@@ -3,15 +3,17 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/andrew-grechkin/update-yaml.svg)](https://pkg.go.dev/github.com/andrew-grechkin/update-yaml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/andrew-grechkin/update-yaml)](https://goreportcard.com/report/github.com/andrew-grechkin/update-yaml)
 
-A CLI filter for updating YAML documents from one or more YAML/JSON data files while preserving comments, key order, and
+A CLI filter for updating YAML documents from one or more YAML/JSON data files while preserving comments, key order and
 formatting of the original.
 
 Tailored for developers who maintain **hand-edited config files**, **Kubernetes manifests**, **Helm values**, **CI/CD
 configs**, or any YAML file where comments and structure matter and a full re-marshal would lose them.
 
 While round-tripping YAML through generic tools (`yq`, `jaq`, ad-hoc scripts) is easy, doing it without destroying
-comments, blank lines, and the author's intent is not. `update-yaml` is a small CLI filter that keeps the original
-document intact and only touches what the data files ask it to touch.
+comments, blank lines and the author's intent is not. That's why it is important to separate 2 concerns for this task:
+update YAML file and calculate data for update. When these 2 concerns are separated any tool or any language can be used
+to prepare a new data set and what is left for `update-yaml` is just take the provided data and inject it into correct
+place into existing YAML keeping it as close as possible to the original document.
 
 ## SYNOPSIS
 
@@ -47,14 +49,13 @@ export PATH="${GOBIN:-${GOPATH:-$HOME/go}/bin}:$PATH"
 
 ## FEATURES
 
-- Reads target YAML from STDIN, writes updated result to STDOUT
-- Preserves head, inline, and trailing comments on untouched and replaced values
+- Pure CLI filter: reads target YAML from STDIN, writes updated result to STDOUT
+- Preserves head, inline and trailing comments on untouched and replaced values
 - Preserves key order of the original document
 - Deep merges multiple data files (like Helm) - later files override earlier ones
 - Multi-document YAML supported on both sides (STDIN doc[i] is updated by merged data doc[i])
 - Explicit `null` in data removes the corresponding key from the output
 - Keys present only in data files are appended at the end of their mapping (alphabetical order)
-- Pure filter - no in-place editing, no temp files, easy to embed in any pipeline
 
 ## USAGE
 
@@ -119,7 +120,7 @@ database:
   host: db.internal
 ```
 
-The result keeps both the head comment and the inline comment, and only the value changes:
+The result keeps both the head comment and the inline comment and only the value changes:
 
 ```yaml
 # Database connection settings
@@ -177,10 +178,9 @@ updates. Trailing `...` end markers are supported but optional.
 The most compact form uses an inline placeholder:
 
 ```yaml
+--- {}
 ---
-{}
----
-real: updates
+real: updates for the second doc in the input
 ```
 
 Repeat the `--- {}` line to skip more leading docs. Files emitted by tools that produce canonical streams (e.g. `jaq
@@ -191,7 +191,7 @@ Repeat the `--- {}` line to skip more leading docs. Files emitted by tools that 
 {}
 ...
 ---
-real: updates
+real: updates for the second doc in the input
 ...
 ```
 

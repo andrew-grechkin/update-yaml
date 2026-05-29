@@ -1,0 +1,16 @@
+---
+# first doc: app config
+app:
+  name: web
+  port: 9090
+
+---
+# second doc: worker config
+worker:
+  name: worker
+  queue: high
+  concurrency: 4
+
+# also untouched
+extra: keep
+new_field: appended

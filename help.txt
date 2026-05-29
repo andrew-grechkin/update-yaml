@@ -1,0 +1,47 @@
+Usage: update-yaml [OPTIONS] [FILE...]
+
+A CLI filter for updating YAML documents from one or more YAML/JSON data
+files while preserving comments, key order, and formatting of the original.
+
+Reads target YAML from STDIN, outputs updated result to STDOUT.
+
+Data files are merged in order (later files override earlier ones).
+
+Multi-document YAML is supported on both sides: stdin doc[i] is updated
+by the merged data doc[i]. When data files are provided they must cover
+every stdin doc; fewer data docs than stdin docs is an error. Extra data
+docs (beyond stdin's count) are ignored.
+
+A data file may target a non-first stdin doc by including explicit empty
+placeholder docs at the front, in canonical YAML 1.2 stream form. Use
+`{}` (empty mapping) or `null` as the placeholder body for any doc that
+should not contribute updates. Trailing `...` end markers are supported
+but optional.
+
+    update-yaml < target.yaml doc0.yaml doc1.yaml
+
+The most compact form for doc1.yaml uses an inline placeholder:
+
+    --- {}
+    ---
+    real: updates
+
+Repeat the `--- {}` line to skip more leading docs. Files emitted by
+tools that produce canonical streams (e.g. `jaq --to yaml` or `yq -y`)
+also work as-is.
+
+Keys that exist in the STDIN document are updated in place.
+Keys present only in the data files are appended at the end of their mapping (in
+  alphabetical order).
+Setting a key to an explicit null in the merged data removes it from the output.
+Comments and key order from STDIN are preserved.
+
+Options:
+  -h, --help        Display help message
+  -m, --man         Display full readme         (tip: update-yaml --man | colored-md)
+  -v, --version     Display version information (tip: update-yaml --version | jq -r .Version)
+
+Examples:
+  update-yaml < target.yaml base.yaml override.yaml
+
+  update-yaml <<< 'name: old # name of the item' <(echo 'name: new')

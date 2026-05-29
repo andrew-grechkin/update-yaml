@@ -1,0 +1,13 @@
+database:
+  name: app_prod
+  port: null
+service:
+  timeout: 90
+  features:
+    - login
+    - signup
+    - sso
+telemetry:
+  endpoint: https://otel.example/v1
+  sample_rate: 0.1
+debug: null

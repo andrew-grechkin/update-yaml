@@ -1,0 +1,21 @@
+# Database connection settings
+database:
+  host: db.internal # default for dev
+  name: app_prod
+
+# Service tuning
+service:
+  replicas: 3
+  # timeout in seconds
+  timeout: 90
+  features:
+    - login
+    - signup
+    - sso
+  metrics:
+    enabled: true
+    port: 9090
+
+telemetry:
+  endpoint: https://otel.example/v1
+  sample_rate: 0.1

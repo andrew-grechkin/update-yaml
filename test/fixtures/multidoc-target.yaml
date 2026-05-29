@@ -1,0 +1,18 @@
+---
+# first doc: app config
+app:
+  name: web
+  port: 8080
+
+# untouched
+debug: false
+
+---
+# second doc: worker config
+worker:
+  name: worker
+  queue: low
+  concurrency: 1
+
+# also untouched
+extra: keep

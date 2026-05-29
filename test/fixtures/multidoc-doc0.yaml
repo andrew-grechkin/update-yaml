@@ -1,0 +1,5 @@
+---
+app:
+  port: 9090
+
+debug: null

@@ -1,0 +1,17 @@
+# Database connection settings
+database:
+  host: localhost  # default for dev
+  port: 5432
+  name: app_dev
+
+# Service tuning
+service:
+  replicas: 1
+  # timeout in seconds
+  timeout: 30
+  features:
+    - login
+    - signup
+
+# Will not be touched if not in data files
+debug: false

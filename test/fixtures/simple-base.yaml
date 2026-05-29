@@ -1,0 +1,8 @@
+database:
+  host: db.internal
+  port: 6432
+service:
+  replicas: 3
+  metrics:
+    enabled: true
+    port: 9090

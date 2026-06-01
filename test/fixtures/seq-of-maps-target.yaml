@@ -1,0 +1,5 @@
+servers:
+  - name: alpha
+    port: 80
+  - name: beta
+    port: 443

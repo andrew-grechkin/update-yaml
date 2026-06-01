@@ -1,0 +1,11 @@
+defaults: &defaults
+  timeout: 60
+  max_size: 1024
+
+prod:
+  <<: *defaults
+  host: new.example.com
+
+dev:
+  <<: *defaults
+  host: dev.example.com

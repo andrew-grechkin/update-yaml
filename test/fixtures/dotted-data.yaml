@@ -1,0 +1,3 @@
+limits.cpu: "2"
+limits.gone: null
+limits.memory: "512Mi"

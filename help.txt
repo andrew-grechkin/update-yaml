@@ -31,8 +31,7 @@ tools that produce canonical streams (e.g. `jaq --to yaml` or `yq -y`)
 also work as-is.
 
 Keys that exist in the STDIN document are updated in place.
-Keys present only in the data files are appended at the end of their mapping (in
-  alphabetical order).
+Keys present only in the data files are appended at the end of their mapping.
 Setting a key to an explicit null in the merged data removes it from the output.
 Comments and key order from STDIN are preserved.
 

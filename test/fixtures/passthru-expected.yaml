@@ -1,0 +1,8 @@
+padding: |
+  filler line one
+  filler line two
+  filler line three
+script: |
+  echo "Dummy e2e Java Test job completed!"
+---
+foo: bar

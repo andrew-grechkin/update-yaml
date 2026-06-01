@@ -9,12 +9,12 @@ import (
 	"io"
 	"os"
 	"runtime/debug"
-	"sort"
 	"strings"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/parser"
+	"github.com/goccy/go-yaml/token"
 )
 
 //go:embed help.txt
@@ -89,31 +89,93 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		return err
 	}
 
-	return writeOutput(stdout, file)
+	return writeOutput(stdout, file, stdinBytes, modifiedDocs(file, mergedDocs))
+}
+
+// modifiedDocs reports per-document whether updates were applied. A document
+// is considered modified if data exists for that index and the data has at
+// least one key. Untouched docs are passed through verbatim from the source
+// to avoid goccy's cosmetic re-rendering (e.g. `{ }` → `{}`).
+func modifiedDocs(file *ast.File, mergedDocs []yaml.MapSlice) []bool {
+	modified := make([]bool, len(file.Docs))
+	for i := range file.Docs {
+		if i < len(mergedDocs) && len(mergedDocs[i]) > 0 {
+			modified[i] = true
+		}
+	}
+	return modified
 }
 
 // applyMergedDocs walks file.Docs and applies merged data per-index. Each doc
 // is updated through a temporary single-doc *ast.File wrapping the same
 // DocumentNode pointer, because yaml.Path operations otherwise match every
 // doc in the file at once. Mutations propagate back to file.
-func applyMergedDocs(file *ast.File, mergedDocs []map[string]any) error {
+func applyMergedDocs(file *ast.File, mergedDocs []yaml.MapSlice) error {
+	indent := detectIndent(file)
 	for i, doc := range file.Docs {
 		if doc.Body == nil {
 			continue
 		}
-		if i >= len(mergedDocs) || mergedDocs[i] == nil {
+		if i >= len(mergedDocs) || len(mergedDocs[i]) == 0 {
 			continue
 		}
 		scoped := &ast.File{Docs: []*ast.DocumentNode{doc}}
-		if err := updateAtNode(scoped, doc.Body, "$", mergedDocs[i]); err != nil {
+		if err := updateAtNode(scoped, doc.Body, "$", mergedDocs[i], indent); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func writeOutput(stdout io.Writer, file *ast.File) error {
-	out := file.String()
+// detectIndent infers the block-mapping indent (in spaces) used in the source
+// by scanning the AST for the first parent→child mapping pair and measuring
+// the column gap. Defaults to 2 when nothing decisive is found, so newly
+// synthesized entries match the source's visual style.
+func detectIndent(file *ast.File) int {
+	const def = 2
+	for _, doc := range file.Docs {
+		if n := findIndentInNode(doc.Body); n > 0 {
+			return n
+		}
+	}
+	return def
+}
+
+func findIndentInNode(n ast.Node) int {
+	mn, ok := n.(*ast.MappingNode)
+	if !ok || mn.IsFlowStyle {
+		return 0
+	}
+	for _, mv := range mn.Values {
+		if child, ok := mv.Value.(*ast.MappingNode); ok && !child.IsFlowStyle && len(child.Values) > 0 {
+			parentCol := mv.Key.GetToken().Position.Column
+			childCol := child.Values[0].Key.GetToken().Position.Column
+			if childCol > parentCol {
+				return childCol - parentCol
+			}
+		}
+		if found := findIndentInNode(mv.Value); found > 0 {
+			return found
+		}
+	}
+	return 0
+}
+
+// writeOutput renders the result. For docs flagged as modified it uses
+// goccy's serializer; for untouched docs it splices the original source bytes
+// verbatim, so cosmetic round-trip changes (e.g. `{ }` → `{}`, quote-style
+// drift on keys never touched) don't leak into the output
+func writeOutput(stdout io.Writer, file *ast.File, original []byte, modified []bool) error {
+	parts := make([]string, len(file.Docs))
+	starts := docByteStarts(file, original)
+	for i, doc := range file.Docs {
+		if modified[i] {
+			parts[i] = doc.String()
+			continue
+		}
+		parts[i] = strings.TrimRight(string(original[starts[i]:starts[i+1]]), "\n")
+	}
+	out := strings.Join(parts, "\n")
 	if !strings.HasSuffix(out, "\n") {
 		out += "\n"
 	}
@@ -121,12 +183,60 @@ func writeOutput(stdout io.Writer, file *ast.File) error {
 	return err
 }
 
+// docByteStarts returns N+1 byte offsets such that doc i occupies
+// original[s[i]:s[i+1]]. Boundaries are computed from each doc's first-token
+// line (which goccy reports reliably) translated to byte offsets via a line
+// table built from the source. Token Position.Offset is unreliable here:
+// goccy can mis-account it across block-literal scalars, so don't use it.
+func docByteStarts(file *ast.File, original []byte) []int {
+	starts := make([]int, len(file.Docs)+1)
+	if len(starts) == 1 {
+		starts[0] = len(original)
+		return starts
+	}
+	lineOff := lineOffsets(original)
+	for i, d := range file.Docs {
+		switch line := docStartLine(d); {
+		case line >= 1 && line < len(lineOff):
+			starts[i] = lineOff[line]
+		case line >= len(lineOff):
+			starts[i] = len(original)
+		}
+	}
+	starts[0] = 0
+	starts[len(file.Docs)] = len(original)
+	return starts
+}
+
+func docStartLine(d *ast.DocumentNode) int {
+	if d.Start != nil {
+		return d.Start.Position.Line
+	}
+	if d.Body != nil {
+		return d.Body.GetToken().Position.Line
+	}
+	return 1
+}
+
+// lineOffsets returns a table where entry i is the byte offset of the start
+// of line i (1-based). Entry 0 is unused.
+func lineOffsets(b []byte) []int {
+	offs := make([]int, 2, 1+strings.Count(string(b), "\n")+1)
+	offs[1] = 0
+	for i, c := range b {
+		if c == '\n' {
+			offs = append(offs, i+1)
+		}
+	}
+	return offs
+}
+
 // mergeDataFiles reads each file as multi-document YAML and merges across
 // files index-by-index: result[i] is the merge of all files' i-th document.
 // Files with fewer docs contribute nothing past their last doc.
-func mergeDataFiles(files []string) ([]map[string]any, error) {
+func mergeDataFiles(files []string) ([]yaml.MapSlice, error) {
 	maxLen := 0
-	perFile := make([][]map[string]any, 0, len(files))
+	perFile := make([][]yaml.MapSlice, 0, len(files))
 	for _, f := range files {
 		docs, err := readMultiDoc(f)
 		if err != nil {
@@ -140,7 +250,7 @@ func mergeDataFiles(files []string) ([]map[string]any, error) {
 	if maxLen == 0 {
 		return nil, nil
 	}
-	merged := make([]map[string]any, maxLen)
+	merged := make([]yaml.MapSlice, maxLen)
 	for _, docs := range perFile {
 		for i, d := range docs {
 			merged[i] = mergeInto(merged[i], d)
@@ -149,16 +259,16 @@ func mergeDataFiles(files []string) ([]map[string]any, error) {
 	return merged, nil
 }
 
-func readMultiDoc(path string) ([]map[string]any, error) {
+func readMultiDoc(path string) ([]yaml.MapSlice, error) {
 	r, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("error reading %s: %w", path, err)
 	}
 	defer r.Close()
-	dec := yaml.NewDecoder(r)
-	var docs []map[string]any
+	dec := yaml.NewDecoder(r, yaml.UseOrderedMap())
+	var docs []yaml.MapSlice
 	for {
-		var m map[string]any
+		var m yaml.MapSlice
 		if err := dec.Decode(&m); err != nil {
 			if errors.Is(err, io.EOF) {
 				break
@@ -170,8 +280,10 @@ func readMultiDoc(path string) ([]map[string]any, error) {
 	return docs, nil
 }
 
-// mergeInto merges src into dst. Later values win including explicit nils,
-// which the walker later interprets as "remove this key from the output".
+// mergeInto merges src into dst. Order is "first-occurrence wins": existing
+// dst keys keep their slot; new src keys are appended at the end. Values
+// follow last-write-wins semantics, including explicit nils, which the walker
+// later interprets as "remove this key from the output".
 //
 // I don't use dario.cat/mergo here. mergo.WithOverride skips zero values in
 // src, so a later file's `key: null` silently fails to override an earlier
@@ -180,20 +292,46 @@ func readMultiDoc(path string) ([]map[string]any, error) {
 // erase keys whose final value happens to be `""` or `[]`, which is wrong.
 // I need exactly nil-overrides-non-nil with no other changes to zero-value
 // handling, so a small custom merge is clearer than tuning mergo flags.
-func mergeInto(dst, src map[string]any) map[string]any {
-	if dst == nil {
+func mergeInto(dst, src yaml.MapSlice) yaml.MapSlice {
+	if len(dst) == 0 {
 		return src
 	}
-	for k, v := range src {
-		if subSrc, ok := v.(map[string]any); ok {
-			if subDst, ok := dst[k].(map[string]any); ok {
-				dst[k] = mergeInto(subDst, subSrc)
+	for _, sItem := range src {
+		sk, ok := sItem.Key.(string)
+		if !ok {
+			dst = append(dst, sItem)
+			continue
+		}
+		idx := mapSliceIndex(dst, sk)
+		if idx < 0 {
+			dst = append(dst, sItem)
+			continue
+		}
+		if dSub, ok := dst[idx].Value.(yaml.MapSlice); ok {
+			if sSub, ok := sItem.Value.(yaml.MapSlice); ok {
+				dst[idx].Value = mergeInto(dSub, sSub)
 				continue
 			}
 		}
-		dst[k] = v
+		dst[idx].Value = sItem.Value
 	}
 	return dst
+}
+
+func mapSliceIndex(m yaml.MapSlice, key string) int {
+	for i, item := range m {
+		if k, ok := item.Key.(string); ok && k == key {
+			return i
+		}
+	}
+	return -1
+}
+
+func mapSliceLookup(m yaml.MapSlice, key string) (any, bool) {
+	if i := mapSliceIndex(m, key); i >= 0 {
+		return m[i].Value, true
+	}
+	return nil, false
 }
 
 // updateAtNode walks a mapping node and updates values for keys present in
@@ -203,8 +341,8 @@ func mergeInto(dst, src map[string]any) map[string]any {
 // (recursively, for nested mappings) in alphabetical order. An explicit nil
 // value in data removes the corresponding key from the output (or skips
 // appending if the key did not exist).
-func updateAtNode(file *ast.File, node ast.Node, path string, data map[string]any) error {
-	seen, toRemove, err := updateExistingEntries(file, node, path, data)
+func updateAtNode(file *ast.File, node ast.Node, path string, data yaml.MapSlice, indent int) error {
+	seen, toRemove, err := updateExistingEntries(file, node, path, data, indent)
 	if err != nil {
 		return err
 	}
@@ -213,15 +351,27 @@ func updateAtNode(file *ast.File, node ast.Node, path string, data map[string]an
 	if !ok {
 		return nil
 	}
+	// Snapshot the first-key column before removal. Goccy's MappingNode.Start
+	// points at the ':' token of its first child, not the key, so once Values
+	// is empty, startPos() returns a column that's offset by the key length.
+	// That throws off mn.Merge's column math then append a new entry,
+	// indenting it to where the colon used to be.
+	var firstKeyCol int
+	if len(mn.Values) > 0 {
+		firstKeyCol = mn.Values[0].Key.GetToken().Position.Column
+	}
 	removeMarkedEntries(mn, toRemove)
-	return appendMissingEntries(mn, data, seen)
+	if len(mn.Values) == 0 && firstKeyCol > 0 && mn.Start != nil {
+		mn.Start.Position.Column = firstKeyCol
+	}
+	return appendMissingEntries(mn, data, seen, indent)
 }
 
 // updateExistingEntries iterates the mapping's existing entries and either
 // replaces, recurses into, or marks them for removal based on data. Returns
 // the set of keys it touched and the set of MappingValueNodes to remove.
 func updateExistingEntries(
-	file *ast.File, node ast.Node, path string, data map[string]any,
+	file *ast.File, node ast.Node, path string, data yaml.MapSlice, indent int,
 ) (map[string]bool, map[*ast.MappingValueNode]bool, error) {
 	seen := make(map[string]bool, len(data))
 	toRemove := make(map[*ast.MappingValueNode]bool)
@@ -230,7 +380,7 @@ func updateExistingEntries(
 		if key == "" {
 			continue
 		}
-		val, ok := data[key]
+		val, ok := mapSliceLookup(data, key)
 		if !ok {
 			continue
 		}
@@ -239,7 +389,7 @@ func updateExistingEntries(
 			toRemove[mv] = true
 			continue
 		}
-		if err := applyValue(file, mv, val, joinPath(path, key)); err != nil {
+		if err := applyValue(file, mv, val, joinPath(path, key), indent); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -248,14 +398,39 @@ func updateExistingEntries(
 
 // applyValue updates mv to reflect val: recurses into a sub-mapping when
 // both sides are mappings, otherwise replaces the scalar/sequence value.
-func applyValue(file *ast.File, mv *ast.MappingValueNode, val any, childPath string) error {
-	if subMap, ok := val.(map[string]any); ok && mappingValues(mv.Value) != nil {
-		return updateAtNode(file, mv.Value, childPath, subMap)
+// When both old and new are sequences, the original sequence's indent style
+// (flush vs. extra-indented entries) is preserved; otherwise default to
+// extra-indented, which is the more readable form for newly-emitted YAML.
+// AnchorNode wrappers (`key: &name <value>`) are temporarily unwrapped so
+// yaml.Path can navigate into the inner mapping (it can't see through
+// anchors); the wrapper is reattached after the recursion, and since its
+// Value field points to the same (now-mutated) mapping the binding survives.
+func applyValue(file *ast.File, mv *ast.MappingValueNode, val any, childPath string, indent int) error {
+	targetVal, restore := unwrapAnchor(mv)
+	defer restore()
+
+	if subMap, ok := val.(yaml.MapSlice); ok && mappingValues(targetVal) != nil {
+		return updateAtNode(file, targetVal, childPath, subMap, indent)
 	}
-	if err := replaceAt(file, childPath, val); err != nil {
+	seqIndent := true
+	if seq, ok := targetVal.(*ast.SequenceNode); ok {
+		if _, ok := val.([]any); ok && !seq.IsFlowStyle && len(seq.Values) > 0 {
+			seqIndent = seq.Start.Position.Column > mv.Key.GetToken().Position.Column
+		}
+	}
+	if err := replaceAt(file, childPath, val, indent, seqIndent); err != nil {
 		return fmt.Errorf("replacing %s: %w", childPath, err)
 	}
 	return nil
+}
+
+func unwrapAnchor(mv *ast.MappingValueNode) (ast.Node, func()) {
+	anchor, ok := mv.Value.(*ast.AnchorNode)
+	if !ok {
+		return mv.Value, func() {}
+	}
+	mv.Value = anchor.Value
+	return anchor.Value, func() { mv.Value = anchor }
 }
 
 func removeMarkedEntries(mn *ast.MappingNode, toRemove map[*ast.MappingValueNode]bool) {
@@ -305,18 +480,15 @@ func ensureBlankFoot(mv *ast.MappingValueNode) {
 
 // appendMissingEntries adds entries for keys present in data but absent from
 // the mapping (and not nil - explicit nils don't materialize new keys).
-// Appended in alphabetical order for deterministic output.
-func appendMissingEntries(mn *ast.MappingNode, data map[string]any, seen map[string]bool) error {
-	missing := make([]string, 0, len(data))
-	for k, v := range data {
-		if seen[k] || v == nil {
+// Iterates data in its declared order so the appended keys mirror how the
+// user wrote them in the source data files.
+func appendMissingEntries(mn *ast.MappingNode, data yaml.MapSlice, seen map[string]bool, indent int) error {
+	for _, item := range data {
+		k, ok := item.Key.(string)
+		if !ok || seen[k] || item.Value == nil {
 			continue
 		}
-		missing = append(missing, k)
-	}
-	sort.Strings(missing)
-	for _, k := range missing {
-		extra, err := buildSingleEntryMapping(k, data[k])
+		extra, err := buildSingleEntryMapping(k, item.Value, indent)
 		if err != nil {
 			return fmt.Errorf("building entry %q: %w", k, err)
 		}
@@ -325,8 +497,8 @@ func appendMissingEntries(mn *ast.MappingNode, data map[string]any, seen map[str
 	return nil
 }
 
-func buildSingleEntryMapping(key string, val any) (*ast.MappingNode, error) {
-	out, err := yaml.Marshal(map[string]any{key: val})
+func buildSingleEntryMapping(key string, val any, indent int) (*ast.MappingNode, error) {
+	out, err := yaml.MarshalWithOptions(yaml.MapSlice{{Key: key, Value: val}}, yaml.Indent(indent), yaml.IndentSequence(true))
 	if err != nil {
 		return nil, err
 	}
@@ -365,7 +537,8 @@ func keyString(node ast.Node) string {
 }
 
 // joinPath builds a goccy YAMLPath. Simple identifiers use dotted form;
-// anything else is quoted via brackets.
+// anything else is wrapped in single quotes (goccy's reserved-char escape:
+// `$.foo.'bar.baz-*'.hoge`, with `\` escaping `'` and `\` itself).
 func joinPath(prefix, key string) string {
 	if isSimpleIdent(key) {
 		if prefix == "$" {
@@ -373,8 +546,9 @@ func joinPath(prefix, key string) string {
 		}
 		return prefix + "." + key
 	}
-	q := strings.ReplaceAll(key, "'", "''")
-	return prefix + "['" + q + "']"
+	q := strings.ReplaceAll(key, `\`, `\\`)
+	q = strings.ReplaceAll(q, "'", `\'`)
+	return prefix + ".'" + q + "'"
 }
 
 func isSimpleIdent(s string) bool {
@@ -404,10 +578,11 @@ func isIdentRune(r rune, isFirst bool) bool {
 }
 
 // replaceAt replaces the value at path with the marshalled form of val,
-// preserving any inline/trailing comment that was on the old value.
-// goccy's ReplaceWithReader otherwise drops the trailing comment.
-func replaceAt(file *ast.File, path string, val any) error {
-	out, err := yaml.Marshal(val)
+// preserving any inline/trailing comment that was on the old value and the
+// original scalar quoting style. goccy's ReplaceWithReader otherwise drops
+// the trailing comment and re-quotes scalars using its own heuristics.
+func replaceAt(file *ast.File, path string, val any, indent int, seqIndent bool) error {
+	out, err := yaml.MarshalWithOptions(val, yaml.Indent(indent), yaml.IndentSequence(seqIndent))
 	if err != nil {
 		return fmt.Errorf("marshalling new value: %w", err)
 	}
@@ -416,25 +591,38 @@ func replaceAt(file *ast.File, path string, val any) error {
 		return fmt.Errorf("invalid path %s: %w", path, err)
 	}
 
-	nodeAt := func() ast.Node {
-		n, err := p.FilterFile(file)
-		if err != nil {
-			return nil
-		}
-		return n
-	}
-
-	var savedComment *ast.CommentGroupNode
-	if n := nodeAt(); n != nil {
+	var (
+		savedComment *ast.CommentGroupNode
+		savedQuote   token.Type
+	)
+	if n := nodeAt(p, file); n != nil {
 		savedComment = n.GetComment()
+		if s, ok := n.(*ast.StringNode); ok {
+			savedQuote = s.Token.Type
+		}
 	}
 	if err := p.ReplaceWithReader(file, bytes.NewReader(out)); err != nil {
 		return err
 	}
-	if savedComment != nil {
-		if n := nodeAt(); n != nil {
+	if n := nodeAt(p, file); n != nil {
+		if savedComment != nil {
 			_ = n.SetComment(savedComment)
+		}
+		if s, ok := n.(*ast.StringNode); ok && isExplicitQuote(savedQuote) && isExplicitQuote(s.Token.Type) {
+			s.Token.Type = savedQuote
 		}
 	}
 	return nil
+}
+
+func nodeAt(p *yaml.Path, file *ast.File) ast.Node {
+	n, err := p.FilterFile(file)
+	if err != nil {
+		return nil
+	}
+	return n
+}
+
+func isExplicitQuote(t token.Type) bool {
+	return t == token.SingleQuoteType || t == token.DoubleQuoteType
 }

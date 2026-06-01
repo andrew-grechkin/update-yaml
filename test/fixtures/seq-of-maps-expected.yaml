@@ -1,0 +1,7 @@
+servers:
+  - name: gamma
+    port: 8080
+  - name: delta
+    port: 8443
+  - name: epsilon
+    port: 9090

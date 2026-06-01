@@ -35,6 +35,8 @@ test-int: build
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
+    bin="${GOBIN:-${GOPATH:-$HOME/go}/bin}/update-yaml"
+
     for f in test/fixtures/*-expected.yaml; do
         name=$(basename "$f" -expected.yaml)
         target="test/fixtures/${name}-target.yaml"
@@ -52,7 +54,7 @@ test-int: build
         fi
 
         echo -n "Testing $name... " >&2
-        if result=$(update-yaml "${data[@]}" < "$target") && [[ "$result" == "$(cat "$f")" ]]; then
+        if result=$("$bin" "${data[@]}" < "$target") && [[ "$result" == "$(cat "$f")" ]]; then
             echo "✓ PASS" >&2
         else
             echo "✗ FAIL" >&2

@@ -1,0 +1,8 @@
+zeta: 1
+goner: null
+beta: 2
+alpha: 3
+nested:
+  zeta_inner: a
+  beta_inner: b
+  alpha_inner: c

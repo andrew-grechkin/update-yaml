@@ -1,0 +1,8 @@
+existing: value
+zeta: 1
+beta: 2
+alpha: 3
+nested:
+  zeta_inner: a
+  beta_inner: b
+  alpha_inner: c

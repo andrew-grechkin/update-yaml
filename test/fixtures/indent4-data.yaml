@@ -1,0 +1,7 @@
+parent:
+  b: 2
+  drop_me: null
+extras:
+  sub:
+    x: 1
+    z: 2

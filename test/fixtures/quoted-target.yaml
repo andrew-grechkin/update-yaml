@@ -1,0 +1,21 @@
+single_num: '350'
+double_num: "42"
+double_str: "forty two"
+single_str: 'foo'
+looks_like_bool: 'true'
+looks_like_null: 'null'
+empty_str: ""
+special_str: 'a: b'
+deprecated: "remove me"
+block_literal: |
+  one
+  two
+block_keep: |+
+  one
+
+block_strip: |-
+  one
+  two
+block_folded: >
+  one
+  two

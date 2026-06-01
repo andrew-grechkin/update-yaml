@@ -1,0 +1,4 @@
+barbedwirefence:
+    api: { }
+---
+service: low

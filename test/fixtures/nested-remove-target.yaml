@@ -1,0 +1,8 @@
+a:
+  b:
+    c:
+      remove_me: 1
+      keep_me: 2
+    sibling: x
+  other: y
+top_level: z

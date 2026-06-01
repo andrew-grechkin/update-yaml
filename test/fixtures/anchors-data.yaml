@@ -1,0 +1,6 @@
+defaults:
+  timeout: 60
+  retries: null
+  max_size: 1024
+prod:
+  host: new.example.com

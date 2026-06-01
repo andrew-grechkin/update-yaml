@@ -1,0 +1,2 @@
+limits.cpu: "1"
+limits.gone: "obsolete"

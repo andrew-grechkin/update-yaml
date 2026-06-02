@@ -1,0 +1,5 @@
+app: 'web'
+debug: 'true'
+env: 'prod'
+replicas: '5'
+version: '1.0'

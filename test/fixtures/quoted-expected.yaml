@@ -1,3 +1,7 @@
+appended_bool: true
+appended_float: 3.14
+appended_int: 42
+appended_num: '42'
 single_num: '1982'
 double_num: "99"
 double_str: baz
@@ -17,10 +21,6 @@ block_strip: |-
   four
 block_folded: |
   three four
-appended_num: "42"
-appended_int: 42
-appended_float: 3.14
-appended_bool: true
 multiline_appended: |
   line1
   line2

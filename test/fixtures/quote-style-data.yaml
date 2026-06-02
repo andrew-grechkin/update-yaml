@@ -1,0 +1,2 @@
+replicas: '5'
+debug: 'true'

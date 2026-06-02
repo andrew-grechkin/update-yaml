@@ -92,10 +92,9 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	return writeOutput(stdout, file, stdinBytes, modifiedDocs(file, mergedDocs))
 }
 
-// modifiedDocs reports per-document whether updates were applied. A document
-// is considered modified if data exists for that index and the data has at
-// least one key. Untouched docs are passed through verbatim from the source
-// to avoid goccy's cosmetic re-rendering (e.g. `{ }` → `{}`).
+// modifiedDocs reports per-doc whether updates were applied. Untouched docs
+// are passed through verbatim from the source to dodge goccy's cosmetic
+// re-rendering (e.g. `{ }` -> `{}`).
 func modifiedDocs(file *ast.File, mergedDocs []yaml.MapSlice) []bool {
 	modified := make([]bool, len(file.Docs))
 	for i := range file.Docs {
@@ -106,39 +105,125 @@ func modifiedDocs(file *ast.File, mergedDocs []yaml.MapSlice) []bool {
 	return modified
 }
 
-// applyMergedDocs walks file.Docs and applies merged data per-index. Each doc
-// is updated through a temporary single-doc *ast.File wrapping the same
-// DocumentNode pointer, because yaml.Path operations otherwise match every
-// doc in the file at once. Mutations propagate back to file.
+// applyMergedDocs scopes each doc into a temporary single-doc *ast.File
+// because yaml.Path operations otherwise match every doc in the file at once.
+// The DocumentNode pointer is shared, so mutations propagate back.
+//
+// Empty-stream and null/nil-body docs are lazily promoted to empty block
+// mappings only when data has updates for that slot. Slots with no data
+// keep their original body, so an unmodified `---\nnull` survives intact.
 func applyMergedDocs(file *ast.File, mergedDocs []yaml.MapSlice) error {
-	indent := detectIndent(file)
+	detectedStyle = detectStyle(file)
+	if len(file.Docs) == 0 && len(mergedDocs) > 0 {
+		file.Docs = append(file.Docs, newEmptyDoc())
+	}
 	for i, doc := range file.Docs {
-		if doc.Body == nil {
-			continue
-		}
 		if i >= len(mergedDocs) || len(mergedDocs[i]) == 0 {
 			continue
 		}
+		ensureMappingBody(doc)
 		scoped := &ast.File{Docs: []*ast.DocumentNode{doc}}
-		if err := updateAtNode(scoped, doc.Body, "$", mergedDocs[i], indent); err != nil {
+		if err := updateAtNode(scoped, doc.Body, "$", mergedDocs[i]); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// detectIndent infers the block-mapping indent (in spaces) used in the source
-// by scanning the AST for the first parent→child mapping pair and measuring
-// the column gap. Defaults to 2 when nothing decisive is found, so newly
-// synthesized entries match the source's visual style.
-func detectIndent(file *ast.File) int {
-	const def = 2
+// ensureMappingBody swaps a nil or null doc body for a fresh empty block
+// mapping so subsequent updates have somewhere to land.
+func ensureMappingBody(doc *ast.DocumentNode) {
+	if doc.Body == nil {
+		doc.Body = newEmptyBlockMapping()
+		return
+	}
+	if _, isNull := doc.Body.(*ast.NullNode); isNull {
+		doc.Body = newEmptyBlockMapping()
+	}
+}
+
+// newEmptyDoc and newEmptyBlockMapping go through the parser rather than
+// constructing AST nodes directly, so Start/End tokens and BaseNode are
+// populated. An empty mapping renders as `{}` regardless of IsFlowStyle, but
+// once entries are added the flag determines block vs flow output.
+func newEmptyDoc() *ast.DocumentNode {
+	f, _ := parser.ParseBytes([]byte("{}\n"), parser.ParseComments)
+	d := f.Docs[0]
+	d.Body.(*ast.MappingNode).IsFlowStyle = false
+	return d
+}
+
+func newEmptyBlockMapping() *ast.MappingNode {
+	f, _ := parser.ParseBytes([]byte("{}\n"), parser.ParseComments)
+	mn := f.Docs[0].Body.(*ast.MappingNode)
+	mn.IsFlowStyle = false
+	return mn
+}
+
+type style struct {
+	indent      int  // spaces per indent level (block mappings)
+	singleQuote bool // prefer single quotes for values that need quoting
+}
+
+// detectedStyle is set once at the top of applyMergedDocs and read by the
+// marshalling helpers below. Package-level because run isn't reentrant; same
+// pattern as the env var reads.
+var detectedStyle = style{indent: 2}
+
+// detectStyle uses first-occurrence wins: first parent->child mapping pair
+// determines indent step, first explicitly-quoted string determines quote
+// style. Reconciling mixed styles within a file is the linter's job.
+//
+// UPDATE_YAML_PREFER_SINGLE_QUOTE skips quote detection. Only affects values
+// goccy already decided need quoting; plain strings stay plain.
+func detectStyle(file *ast.File) style {
+	s := style{indent: 2}
 	for _, doc := range file.Docs {
 		if n := findIndentInNode(doc.Body); n > 0 {
-			return n
+			s.indent = n
+			break
 		}
 	}
-	return def
+	if os.Getenv("UPDATE_YAML_PREFER_SINGLE_QUOTE") != "" {
+		s.singleQuote = true
+		return s
+	}
+	for _, doc := range file.Docs {
+		if t := findFirstQuote(doc.Body); t == token.SingleQuoteType {
+			s.singleQuote = true
+			break
+		} else if t == token.DoubleQuoteType {
+			break
+		}
+	}
+	return s
+}
+
+func findFirstQuote(n ast.Node) token.Type {
+	switch v := n.(type) {
+	case *ast.StringNode:
+		return v.Token.Type
+	case *ast.MappingNode:
+		for _, mv := range v.Values {
+			if t := findFirstQuote(mv); isExplicitQuote(t) {
+				return t
+			}
+		}
+	case *ast.MappingValueNode:
+		if t := findFirstQuote(v.Key); isExplicitQuote(t) {
+			return t
+		}
+		return findFirstQuote(v.Value)
+	case *ast.SequenceNode:
+		for _, c := range v.Values {
+			if t := findFirstQuote(c); isExplicitQuote(t) {
+				return t
+			}
+		}
+	case *ast.AnchorNode:
+		return findFirstQuote(v.Value)
+	}
+	return token.UnknownType
 }
 
 func findIndentInNode(n ast.Node) int {
@@ -161,33 +246,71 @@ func findIndentInNode(n ast.Node) int {
 	return 0
 }
 
-// writeOutput renders the result. For docs flagged as modified it uses
-// goccy's serializer; for untouched docs it splices the original source bytes
-// verbatim, so cosmetic round-trip changes (e.g. `{ }` → `{}`, quote-style
-// drift on keys never touched) don't leak into the output
+// writeOutput uses goccy's serializer for modified docs and splices the
+// original source bytes verbatim for untouched ones, so cosmetic round-trip
+// changes (e.g. `{ }` -> `{}`, quote-style drift on keys never touched)
+// don't leak into the output.
+//
+// Inter-doc blank lines are preserved by stripping ALL trailing newlines
+// from each part and then joining with a separator computed from the
+// source: one line break plus N extra newlines for N blank lines that
+// preceded doc[i+1] in the input. Without this, a passthrough doc carrying
+// trailing blanks loses them to the trim, and a modified doc never knew
+// about the blanks in the first place.
 func writeOutput(stdout io.Writer, file *ast.File, original []byte, modified []bool) error {
-	parts := make([]string, len(file.Docs))
+	if len(file.Docs) == 0 {
+		return nil
+	}
 	starts := docByteStarts(file, original)
+	lineOff := lineOffsets(original)
+
+	parts := make([]string, len(file.Docs))
 	for i, doc := range file.Docs {
 		if modified[i] {
-			parts[i] = doc.String()
+			parts[i] = strings.TrimRight(doc.String(), "\n")
 			continue
 		}
 		parts[i] = strings.TrimRight(string(original[starts[i]:starts[i+1]]), "\n")
 	}
-	out := strings.Join(parts, "\n")
-	if !strings.HasSuffix(out, "\n") {
-		out += "\n"
+
+	var sb strings.Builder
+	sb.WriteString(parts[0])
+	for i := 1; i < len(parts); i++ {
+		blanks := blanksBeforeDoc(file.Docs[i], lineOff, original)
+		sb.WriteString(strings.Repeat("\n", 1+blanks))
+		sb.WriteString(parts[i])
 	}
-	_, err := fmt.Fprint(stdout, out)
+	sb.WriteByte('\n')
+	_, err := fmt.Fprint(stdout, sb.String())
 	return err
 }
 
-// docByteStarts returns N+1 byte offsets such that doc i occupies
-// original[s[i]:s[i+1]]. Boundaries are computed from each doc's first-token
-// line (which goccy reports reliably) translated to byte offsets via a line
-// table built from the source. Token Position.Offset is unreliable here:
-// goccy can mis-account it across block-literal scalars, so don't use it.
+// blanksBeforeDoc counts consecutive blank source lines immediately above
+// the doc's first-token line. A blank line is one containing only spaces
+// and tabs.
+func blanksBeforeDoc(d *ast.DocumentNode, lineOff []int, b []byte) int {
+	line := docStartLine(d)
+	count := 0
+	for k := line - 1; k >= 1; k-- {
+		if k >= len(lineOff) {
+			break
+		}
+		lineStart := lineOff[k]
+		lineEnd := len(b)
+		if k+1 < len(lineOff) {
+			lineEnd = lineOff[k+1]
+		}
+		if len(bytes.Trim(b[lineStart:lineEnd], " \t\r\n")) > 0 {
+			break
+		}
+		count++
+	}
+	return count
+}
+
+// docByteStarts uses each doc's first-token line (which goccy reports
+// reliably) instead of Position.Offset, which goccy can mis-account across
+// block-literal scalars.
 func docByteStarts(file *ast.File, original []byte) []int {
 	starts := make([]int, len(file.Docs)+1)
 	if len(starts) == 1 {
@@ -218,8 +341,7 @@ func docStartLine(d *ast.DocumentNode) int {
 	return 1
 }
 
-// lineOffsets returns a table where entry i is the byte offset of the start
-// of line i (1-based). Entry 0 is unused.
+// lineOffsets is 1-based to match goccy's Position.Line; entry 0 is unused.
 func lineOffsets(b []byte) []int {
 	offs := make([]int, 2, 1+strings.Count(string(b), "\n")+1)
 	offs[1] = 0
@@ -231,9 +353,8 @@ func lineOffsets(b []byte) []int {
 	return offs
 }
 
-// mergeDataFiles reads each file as multi-document YAML and merges across
-// files index-by-index: result[i] is the merge of all files' i-th document.
-// Files with fewer docs contribute nothing past their last doc.
+// mergeDataFiles merges across files index-by-index. Files with fewer docs
+// contribute nothing past their last doc.
 func mergeDataFiles(files []string) ([]yaml.MapSlice, error) {
 	maxLen := 0
 	perFile := make([][]yaml.MapSlice, 0, len(files))
@@ -280,10 +401,8 @@ func readMultiDoc(path string) ([]yaml.MapSlice, error) {
 	return docs, nil
 }
 
-// mergeInto merges src into dst. Order is "first-occurrence wins": existing
-// dst keys keep their slot; new src keys are appended at the end. Values
-// follow last-write-wins semantics, including explicit nils, which the walker
-// later interprets as "remove this key from the output".
+// mergeInto: order is "first-occurrence wins"; values follow last-write-wins,
+// including explicit nils, which the walker later interprets as "remove".
 //
 // I don't use dario.cat/mergo here. mergo.WithOverride skips zero values in
 // src, so a later file's `key: null` silently fails to override an earlier
@@ -334,15 +453,11 @@ func mapSliceLookup(m yaml.MapSlice, key string) (any, bool) {
 	return nil, false
 }
 
-// updateAtNode walks a mapping node and updates values for keys present in
-// data. When both sides are mappings I recurse instead of replacing wholesale,
-// so that nested comments and keys not mentioned in data are preserved.
-// Keys present in data but absent from the mapping are appended at the end
-// (recursively, for nested mappings) in alphabetical order. An explicit nil
-// value in data removes the corresponding key from the output (or skips
-// appending if the key did not exist).
-func updateAtNode(file *ast.File, node ast.Node, path string, data yaml.MapSlice, indent int) error {
-	seen, toRemove, err := updateExistingEntries(file, node, path, data, indent)
+// updateAtNode recurses on mapping-vs-mapping rather than replacing wholesale
+// so nested comments and unmentioned keys are preserved. Explicit nil in data
+// removes the corresponding key.
+func updateAtNode(file *ast.File, node ast.Node, path string, data yaml.MapSlice) error {
+	seen, toRemove, err := updateExistingEntries(file, node, path, data)
 	if err != nil {
 		return err
 	}
@@ -351,11 +466,10 @@ func updateAtNode(file *ast.File, node ast.Node, path string, data yaml.MapSlice
 	if !ok {
 		return nil
 	}
-	// Snapshot the first-key column before removal. Goccy's MappingNode.Start
-	// points at the ':' token of its first child, not the key, so once Values
-	// is empty, startPos() returns a column that's offset by the key length.
-	// That throws off mn.Merge's column math then append a new entry,
-	// indenting it to where the colon used to be.
+	// Goccy's MappingNode.Start points at the ':' token of the first child,
+	// not the key, so once Values is empty startPos() returns a column offset
+	// by the key length and mn.Merge appends new entries where the colon was.
+	// Snapshot the key column up front and restore it post-removal.
 	var firstKeyCol int
 	if len(mn.Values) > 0 {
 		firstKeyCol = mn.Values[0].Key.GetToken().Position.Column
@@ -364,14 +478,11 @@ func updateAtNode(file *ast.File, node ast.Node, path string, data yaml.MapSlice
 	if len(mn.Values) == 0 && firstKeyCol > 0 && mn.Start != nil {
 		mn.Start.Position.Column = firstKeyCol
 	}
-	return appendMissingEntries(mn, data, seen, indent)
+	return appendMissingEntries(mn, data, seen)
 }
 
-// updateExistingEntries iterates the mapping's existing entries and either
-// replaces, recurses into, or marks them for removal based on data. Returns
-// the set of keys it touched and the set of MappingValueNodes to remove.
 func updateExistingEntries(
-	file *ast.File, node ast.Node, path string, data yaml.MapSlice, indent int,
+	file *ast.File, node ast.Node, path string, data yaml.MapSlice,
 ) (map[string]bool, map[*ast.MappingValueNode]bool, error) {
 	seen := make(map[string]bool, len(data))
 	toRemove := make(map[*ast.MappingValueNode]bool)
@@ -389,28 +500,24 @@ func updateExistingEntries(
 			toRemove[mv] = true
 			continue
 		}
-		if err := applyValue(file, mv, val, joinPath(path, key), indent); err != nil {
+		if err := applyValue(file, mv, val, joinPath(path, key)); err != nil {
 			return nil, nil, err
 		}
 	}
 	return seen, toRemove, nil
 }
 
-// applyValue updates mv to reflect val: recurses into a sub-mapping when
-// both sides are mappings, otherwise replaces the scalar/sequence value.
-// When both old and new are sequences, the original sequence's indent style
-// (flush vs. extra-indented entries) is preserved; otherwise default to
-// extra-indented, which is the more readable form for newly-emitted YAML.
-// AnchorNode wrappers (`key: &name <value>`) are temporarily unwrapped so
-// yaml.Path can navigate into the inner mapping (it can't see through
-// anchors); the wrapper is reattached after the recursion, and since its
-// Value field points to the same (now-mutated) mapping the binding survives.
-func applyValue(file *ast.File, mv *ast.MappingValueNode, val any, childPath string, indent int) error {
+// applyValue: the seqIndent dance preserves the source's flush vs.
+// extra-indented sequence style on replace. AnchorNode wrappers are
+// temporarily unwrapped because yaml.Path can't navigate through them; the
+// wrapper is restored on return and its Value field still points to the
+// (now-mutated) inner mapping, so the binding survives.
+func applyValue(file *ast.File, mv *ast.MappingValueNode, val any, childPath string) error {
 	targetVal, restore := unwrapAnchor(mv)
 	defer restore()
 
 	if subMap, ok := val.(yaml.MapSlice); ok && mappingValues(targetVal) != nil {
-		return updateAtNode(file, targetVal, childPath, subMap, indent)
+		return updateAtNode(file, targetVal, childPath, subMap)
 	}
 	seqIndent := true
 	if seq, ok := targetVal.(*ast.SequenceNode); ok {
@@ -418,7 +525,7 @@ func applyValue(file *ast.File, mv *ast.MappingValueNode, val any, childPath str
 			seqIndent = seq.Start.Position.Column > mv.Key.GetToken().Position.Column
 		}
 	}
-	if err := replaceAt(file, childPath, val, indent, seqIndent); err != nil {
+	if err := replaceAt(file, childPath, val, seqIndent); err != nil {
 		return fmt.Errorf("replacing %s: %w", childPath, err)
 	}
 	return nil
@@ -440,8 +547,8 @@ func removeMarkedEntries(mn *ast.MappingNode, toRemove map[*ast.MappingValueNode
 	filtered := mn.Values[:0]
 	for _, mv := range mn.Values {
 		if toRemove[mv] {
-			// Goccy attaches the head comment (and any blank line preceding
-			// it) to the removed node, so dropping the node erases the blank
+			// Goccy attaches the head comment (and its leading blank line)
+			// to the removed node, so dropping the node erases the blank
 			// too. Promote the blank line to a trailing marker on the
 			// previous surviving sibling so it survives as a section break.
 			if hasLeadingBlankLine(mv) && len(filtered) > 0 {
@@ -454,9 +561,6 @@ func removeMarkedEntries(mn *ast.MappingNode, toRemove map[*ast.MappingValueNode
 	mn.Values = filtered
 }
 
-// hasLeadingBlankLine reports whether the node's head comment is preceded by
-// a blank line in the source (i.e., the comment's first token sits more than
-// one line below the previous token).
 func hasLeadingBlankLine(mv *ast.MappingValueNode) bool {
 	cg := mv.GetComment()
 	if cg == nil || len(cg.Comments) == 0 {
@@ -469,8 +573,8 @@ func hasLeadingBlankLine(mv *ast.MappingValueNode) bool {
 	return tok.Position.Line-tok.Prev.Position.Line > 1
 }
 
-// ensureBlankFoot attaches an empty FootComment so the node renders with a
-// trailing newline. Skipped when the node already has a FootComment.
+// ensureBlankFoot uses an empty FootComment as a marker that goccy renders
+// as a trailing newline. No-op if a FootComment already exists.
 func ensureBlankFoot(mv *ast.MappingValueNode) {
 	if mv.FootComment != nil {
 		return
@@ -478,27 +582,70 @@ func ensureBlankFoot(mv *ast.MappingValueNode) {
 	mv.FootComment = &ast.CommentGroupNode{}
 }
 
-// appendMissingEntries adds entries for keys present in data but absent from
-// the mapping (and not nil - explicit nils don't materialize new keys).
-// Iterates data in its declared order so the appended keys mirror how the
-// user wrote them in the source data files.
-func appendMissingEntries(mn *ast.MappingNode, data yaml.MapSlice, seen map[string]bool, indent int) error {
+// appendMissingEntries:
+//   - mn already has keys: splice each new key at its alphabetical position
+//     among the surviving keys (typical YAML config style; readers expect
+//     keys near the others they share a prefix with).
+//   - mn is empty (freshly built / fully cleared): append in data order,
+//     since there's no existing order to fit into.
+//
+// UPDATE_YAML_PREFER_ORDER_PRESERVED switches to data-order append for
+// non-empty mappings too.
+func appendMissingEntries(mn *ast.MappingNode, data yaml.MapSlice, seen map[string]bool) error {
+	insertSorted := len(mn.Values) > 0 && os.Getenv("UPDATE_YAML_PREFER_ORDER_PRESERVED") == ""
 	for _, item := range data {
 		k, ok := item.Key.(string)
 		if !ok || seen[k] || item.Value == nil {
 			continue
 		}
-		extra, err := buildSingleEntryMapping(k, item.Value, indent)
+		extra, err := buildSingleEntryMapping(k, item.Value)
 		if err != nil {
 			return fmt.Errorf("building entry %q: %w", k, err)
 		}
-		mn.Merge(extra)
+		if insertSorted {
+			mergeSorted(mn, extra)
+		} else {
+			mn.Merge(extra)
+		}
 	}
 	return nil
 }
 
-func buildSingleEntryMapping(key string, val any, indent int) (*ast.MappingNode, error) {
-	out, err := yaml.MarshalWithOptions(yaml.MapSlice{{Key: key, Value: val}}, yaml.Indent(indent), yaml.IndentSequence(true))
+// mergeSorted is a single-entry variant of (*ast.MappingNode).Merge that
+// splices instead of appending. The column-alignment dance mirrors what
+// Merge does internally.
+func mergeSorted(mn *ast.MappingNode, extra *ast.MappingNode) {
+	if len(extra.Values) == 0 {
+		return
+	}
+	if len(extra.Values) != 1 || len(mn.Values) == 0 {
+		mn.Merge(extra)
+		return
+	}
+	col := mn.Values[0].Key.GetToken().Position.Column - extra.Values[0].Key.GetToken().Position.Column
+	extra.AddColumn(col)
+
+	// Rightmost-less-than insertion. When the existing list is sorted this
+	// matches binary insert; when it's not (the source author may have
+	// chosen a non-alphabetical layout), the new key still lands in a
+	// stable position without disrupting the existing order.
+	newKey := keyString(extra.Values[0].Key)
+	pos := 0
+	for i, mv := range mn.Values {
+		if keyString(mv.Key) < newKey {
+			pos = i + 1
+		}
+	}
+	mn.Values = append(mn.Values[:pos], append([]*ast.MappingValueNode{extra.Values[0]}, mn.Values[pos:]...)...)
+}
+
+func buildSingleEntryMapping(key string, val any) (*ast.MappingNode, error) {
+	out, err := yaml.MarshalWithOptions(
+		yaml.MapSlice{{Key: key, Value: val}},
+		yaml.Indent(detectedStyle.indent),
+		yaml.IndentSequence(true),
+		yaml.UseSingleQuote(detectedStyle.singleQuote),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -536,9 +683,9 @@ func keyString(node ast.Node) string {
 	return node.String()
 }
 
-// joinPath builds a goccy YAMLPath. Simple identifiers use dotted form;
-// anything else is wrapped in single quotes (goccy's reserved-char escape:
-// `$.foo.'bar.baz-*'.hoge`, with `\` escaping `'` and `\` itself).
+// joinPath uses goccy's reserved-char escape for non-identifier keys:
+// `$.foo.'bar.baz-*'.hoge`, with `\` escaping `'` and `\` itself. Bracket
+// form `$['key']` is rejected by goccy's PathString.
 func joinPath(prefix, key string) string {
 	if isSimpleIdent(key) {
 		if prefix == "$" {
@@ -577,12 +724,16 @@ func isIdentRune(r rune, isFirst bool) bool {
 	return false
 }
 
-// replaceAt replaces the value at path with the marshalled form of val,
-// preserving any inline/trailing comment that was on the old value and the
-// original scalar quoting style. goccy's ReplaceWithReader otherwise drops
-// the trailing comment and re-quotes scalars using its own heuristics.
-func replaceAt(file *ast.File, path string, val any, indent int, seqIndent bool) error {
-	out, err := yaml.MarshalWithOptions(val, yaml.Indent(indent), yaml.IndentSequence(seqIndent))
+// replaceAt preserves the inline/trailing comment and explicit quote style
+// across the swap; goccy's ReplaceWithReader otherwise drops the trailing
+// comment and re-quotes scalars using its own heuristics.
+func replaceAt(file *ast.File, path string, val any, seqIndent bool) error {
+	out, err := yaml.MarshalWithOptions(
+		val,
+		yaml.Indent(detectedStyle.indent),
+		yaml.IndentSequence(seqIndent),
+		yaml.UseSingleQuote(detectedStyle.singleQuote),
+	)
 	if err != nil {
 		return fmt.Errorf("marshalling new value: %w", err)
 	}

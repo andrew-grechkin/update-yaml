@@ -1,7 +1,7 @@
-parent:
-    a: 1
-    b: 2
 extras:
     sub:
         x: 1
         z: 2
+parent:
+    a: 1
+    b: 2

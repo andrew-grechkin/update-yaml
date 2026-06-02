@@ -3,7 +3,7 @@ Usage: update-yaml [OPTIONS] [FILE...]
 A CLI filter for updating YAML documents from one or more YAML/JSON data
 files while preserving comments, key order, and formatting of the original.
 
-Reads target YAML from STDIN, outputs updated result to STDOUT.
+Reads source YAML from STDIN, outputs updated result to STDOUT.
 
 Data files are merged in order (later files override earlier ones).
 
@@ -12,13 +12,13 @@ by the merged data doc[i]. When data files are provided they must cover
 every stdin doc; fewer data docs than stdin docs is an error. Extra data
 docs (beyond stdin's count) are ignored.
 
-A data file may target a non-first stdin doc by including explicit empty
+A data file may source a non-first stdin doc by including explicit empty
 placeholder docs at the front, in canonical YAML 1.2 stream form. Use
 `{}` (empty mapping) or `null` as the placeholder body for any doc that
 should not contribute updates. Trailing `...` end markers are supported
 but optional.
 
-    update-yaml < target.yaml doc0.yaml doc1.yaml
+    update-yaml < source.yaml doc0.yaml doc1.yaml
 
 The most compact form for doc1.yaml uses an inline placeholder:
 
@@ -40,7 +40,11 @@ Options:
   -m, --man         Display full readme         (tip: update-yaml --man | colored-md)
   -v, --version     Display version information (tip: update-yaml --version | jq -r .Version)
 
+Environment:
+  UPDATE_YAML_PREFER_ORDER_PRESERVED  new keys are appended in the order data declares them
+  UPDATE_YAML_PREFER_SINGLE_QUOTE     values that need quoting are emitted with single quotes
+
 Examples:
-  update-yaml < target.yaml base.yaml override.yaml
+  update-yaml < source.yaml base.yaml override.yaml
 
   update-yaml <<< 'name: old # name of the item' <(echo 'name: new')

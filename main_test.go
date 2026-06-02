@@ -108,6 +108,75 @@ func TestRunNoArgsIsPassthrough(t *testing.T) {
 	assertContains(t, got, "host: localhost")
 }
 
+// New keys go in alphabetically by default; UPDATE_YAML_PREFER_ORDER_PRESERVED
+// reverts to data-order append.
+func TestRunPreferOrderPreserved(t *testing.T) {
+	target := []byte("existing: value\n")
+	data := []byte("zeta: 1\nbeta: 2\nalpha: 3\n")
+	dataPath := filepath.Join(t.TempDir(), "data.yaml")
+	if err := os.WriteFile(dataPath, data, 0o644); err != nil {
+		t.Fatalf("write data: %v", err)
+	}
+
+	t.Run("default sorted", func(t *testing.T) {
+		t.Setenv("UPDATE_YAML_PREFER_ORDER_PRESERVED", "")
+		var stdout bytes.Buffer
+		if err := run([]string{"update-yaml", dataPath}, bytes.NewReader(target), &stdout); err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		want := "alpha: 3\nbeta: 2\nexisting: value\nzeta: 1\n"
+		if got := stdout.String(); got != want {
+			t.Errorf("default sorted insertion: want %q, got %q", want, got)
+		}
+	})
+
+	t.Run("env var preserves data order", func(t *testing.T) {
+		t.Setenv("UPDATE_YAML_PREFER_ORDER_PRESERVED", "1")
+		var stdout bytes.Buffer
+		if err := run([]string{"update-yaml", dataPath}, bytes.NewReader(target), &stdout); err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		want := "existing: value\nzeta: 1\nbeta: 2\nalpha: 3\n"
+		if got := stdout.String(); got != want {
+			t.Errorf("env-var data-order: want %q, got %q", want, got)
+		}
+	})
+}
+
+// UPDATE_YAML_PREFER_SINGLE_QUOTE prefers single quotes for values that need
+// quoting, regardless of what the target file uses.
+func TestRunPreferSingleQuote(t *testing.T) {
+	target := []byte(`host: "old"` + "\n")
+	dataPath := filepath.Join(t.TempDir(), "data.yaml")
+	if err := os.WriteFile(dataPath, []byte("version: '42'\n"), 0o644); err != nil {
+		t.Fatalf("write data: %v", err)
+	}
+
+	t.Run("default follows target", func(t *testing.T) {
+		t.Setenv("UPDATE_YAML_PREFER_SINGLE_QUOTE", "")
+		var stdout bytes.Buffer
+		if err := run([]string{"update-yaml", dataPath}, bytes.NewReader(target), &stdout); err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		want := "host: \"old\"\nversion: \"42\"\n"
+		if got := stdout.String(); got != want {
+			t.Errorf("default: want %q, got %q", want, got)
+		}
+	})
+
+	t.Run("env var prefers single", func(t *testing.T) {
+		t.Setenv("UPDATE_YAML_PREFER_SINGLE_QUOTE", "1")
+		var stdout bytes.Buffer
+		if err := run([]string{"update-yaml", dataPath}, bytes.NewReader(target), &stdout); err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		want := "host: \"old\"\nversion: '42'\n"
+		if got := stdout.String(); got != want {
+			t.Errorf("env var: want %q, got %q", want, got)
+		}
+	})
+}
+
 func TestRunHelp(t *testing.T) {
 	var stdout bytes.Buffer
 	if err := run([]string{"update-yaml", "--help"}, strings.NewReader(""), &stdout); err != nil {
@@ -157,13 +226,13 @@ func TestRunPlaceholderForms(t *testing.T) {
 		name     string
 		dataFile string
 	}{
-		// `{}\n---\n<content>` — no leading start marker
+		// `{}\n---\n<content>` - no leading start marker
 		{"bare", "multidoc-doc1.yaml"},
-		// `--- {}\n---\n<content>` — most compact, recommended
+		// `--- {}\n---\n<content>` - most compact, recommended
 		{"inline", "multidoc-inline-placeholder.yaml"},
-		// `---\n{}\n---\n<content>` — canonical with start, no footer
+		// `---\n{}\n---\n<content>` - canonical with start, no footer
 		{"canonical no footer", "multidoc-canonical-no-footer.yaml"},
-		// `---\n{}\n...\n---\n<content>\n...` — full canonical (jaq/yq output)
+		// `---\n{}\n...\n---\n<content>\n...` - full canonical (jaq/yq output)
 		{"canonical full", "multidoc-canonical-form.yaml"},
 	}
 	for _, c := range cases {

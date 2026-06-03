@@ -76,7 +76,7 @@ export PATH="${GOBIN:-${GOPATH:-$HOME/go}/bin}:$PATH"
 Update with inline data:
 
 ```bash
-update-yaml <<< 'name: old' <(echo 'name: new')
+update-yaml <<< 'name: old # some name' <(echo 'name: new')
 ```
 
 Or with actual files:

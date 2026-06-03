@@ -1,0 +1,19 @@
+---
+service:
+  config:
+    cache:
+      enabled: true
+      size: 2048
+    logging:
+      format: json
+      level: info
+    retries: 3
+    timeout: 30
+
+  metrics:
+    interval: 60
+    path: /metrics
+    port: 9090
+
+  name: api
+  region: null

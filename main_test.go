@@ -22,13 +22,13 @@ func readFixture(t *testing.T, name string) []byte {
 	return b
 }
 
-// runFixtureCase runs the CLI with `target` as stdin and the given fixture
+// runFixtureCase runs the CLI with `source` as stdin and the given fixture
 // names as data file arguments, and returns stdout. Fatals on error.
-func runFixtureCase(t *testing.T, target string, dataFixtures ...string) string {
+func runFixtureCase(t *testing.T, source string, dataFixtures ...string) string {
 	t.Helper()
 	args := append([]string{"update-yaml"}, fixturePaths(dataFixtures)...)
 	var stdout bytes.Buffer
-	if err := run(args, bytes.NewReader(readFixture(t, target)), &stdout); err != nil {
+	if err := run(args, bytes.NewReader(readFixture(t, source)), &stdout); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	return stdout.String()
@@ -72,7 +72,7 @@ func assertNotContains(t *testing.T, got string, substrings ...string) {
 }
 
 func TestRunUpdatesAndPreservesComments(t *testing.T) {
-	got := runFixtureCase(t, "simple-target.yaml", "simple-base.yaml", "simple-override.yaml")
+	got := runFixtureCase(t, "simple-source.yaml", "simple-base.yaml", "simple-override.yaml")
 	assertGolden(t, got, "simple-expected.yaml")
 
 	assertContains(t, got,
@@ -104,14 +104,14 @@ func TestRunUpdatesAndPreservesComments(t *testing.T) {
 }
 
 func TestRunNoArgsIsPassthrough(t *testing.T) {
-	got := runFixtureCase(t, "simple-target.yaml")
+	got := runFixtureCase(t, "simple-source.yaml")
 	assertContains(t, got, "host: localhost")
 }
 
 // New keys go in alphabetically by default; UPDATE_YAML_PREFER_ORDER_PRESERVED
 // reverts to data-order append.
 func TestRunPreferOrderPreserved(t *testing.T) {
-	target := []byte("existing: value\n")
+	source := []byte("existing: value\n")
 	data := []byte("zeta: 1\nbeta: 2\nalpha: 3\n")
 	dataPath := filepath.Join(t.TempDir(), "data.yaml")
 	if err := os.WriteFile(dataPath, data, 0o644); err != nil {
@@ -121,7 +121,7 @@ func TestRunPreferOrderPreserved(t *testing.T) {
 	t.Run("default sorted", func(t *testing.T) {
 		t.Setenv("UPDATE_YAML_PREFER_ORDER_PRESERVED", "")
 		var stdout bytes.Buffer
-		if err := run([]string{"update-yaml", dataPath}, bytes.NewReader(target), &stdout); err != nil {
+		if err := run([]string{"update-yaml", dataPath}, bytes.NewReader(source), &stdout); err != nil {
 			t.Fatalf("run: %v", err)
 		}
 		want := "alpha: 3\nbeta: 2\nexisting: value\nzeta: 1\n"
@@ -133,7 +133,7 @@ func TestRunPreferOrderPreserved(t *testing.T) {
 	t.Run("env var preserves data order", func(t *testing.T) {
 		t.Setenv("UPDATE_YAML_PREFER_ORDER_PRESERVED", "1")
 		var stdout bytes.Buffer
-		if err := run([]string{"update-yaml", dataPath}, bytes.NewReader(target), &stdout); err != nil {
+		if err := run([]string{"update-yaml", dataPath}, bytes.NewReader(source), &stdout); err != nil {
 			t.Fatalf("run: %v", err)
 		}
 		want := "existing: value\nzeta: 1\nbeta: 2\nalpha: 3\n"
@@ -144,18 +144,18 @@ func TestRunPreferOrderPreserved(t *testing.T) {
 }
 
 // UPDATE_YAML_PREFER_SINGLE_QUOTE prefers single quotes for values that need
-// quoting, regardless of what the target file uses.
+// quoting, regardless of what the source file uses.
 func TestRunPreferSingleQuote(t *testing.T) {
-	target := []byte(`host: "old"` + "\n")
+	source := []byte(`host: "old"` + "\n")
 	dataPath := filepath.Join(t.TempDir(), "data.yaml")
 	if err := os.WriteFile(dataPath, []byte("version: '42'\n"), 0o644); err != nil {
 		t.Fatalf("write data: %v", err)
 	}
 
-	t.Run("default follows target", func(t *testing.T) {
+	t.Run("default follows source", func(t *testing.T) {
 		t.Setenv("UPDATE_YAML_PREFER_SINGLE_QUOTE", "")
 		var stdout bytes.Buffer
-		if err := run([]string{"update-yaml", dataPath}, bytes.NewReader(target), &stdout); err != nil {
+		if err := run([]string{"update-yaml", dataPath}, bytes.NewReader(source), &stdout); err != nil {
 			t.Fatalf("run: %v", err)
 		}
 		want := "host: \"old\"\nversion: \"42\"\n"
@@ -167,7 +167,7 @@ func TestRunPreferSingleQuote(t *testing.T) {
 	t.Run("env var prefers single", func(t *testing.T) {
 		t.Setenv("UPDATE_YAML_PREFER_SINGLE_QUOTE", "1")
 		var stdout bytes.Buffer
-		if err := run([]string{"update-yaml", dataPath}, bytes.NewReader(target), &stdout); err != nil {
+		if err := run([]string{"update-yaml", dataPath}, bytes.NewReader(source), &stdout); err != nil {
 			t.Fatalf("run: %v", err)
 		}
 		want := "host: \"old\"\nversion: '42'\n"
@@ -186,7 +186,7 @@ func TestRunHelp(t *testing.T) {
 }
 
 func TestRunMultiDoc(t *testing.T) {
-	got := runFixtureCase(t, "multidoc-target.yaml", "multidoc-data.yaml")
+	got := runFixtureCase(t, "multidoc-source.yaml", "multidoc-data.yaml")
 	assertGolden(t, got, "multidoc-expected.yaml")
 
 	if strings.Count(got, "---") != 2 {
@@ -207,10 +207,10 @@ func TestRunMultiDoc(t *testing.T) {
 }
 
 func TestRunFailsWhenDataHasFewerDocs(t *testing.T) {
-	target := readFixture(t, "multidoc-target.yaml")
+	source := readFixture(t, "multidoc-source.yaml")
 	var stdout bytes.Buffer
 	args := []string{"update-yaml", fixture("simple-base.yaml")}
-	err := run(args, bytes.NewReader(target), &stdout)
+	err := run(args, bytes.NewReader(source), &stdout)
 	if err == nil {
 		t.Fatalf("expected error for short data, got nil; stdout:\n%s", stdout.String())
 	}
@@ -219,7 +219,7 @@ func TestRunFailsWhenDataHasFewerDocs(t *testing.T) {
 	}
 }
 
-// The four valid forms for a data file that targets a non-first stdin doc.
+// The four valid forms for a data file that source a non-first stdin doc.
 // All must produce identical output to the all-in-one multidoc-data.yaml case.
 func TestRunPlaceholderForms(t *testing.T) {
 	cases := []struct {
@@ -237,7 +237,7 @@ func TestRunPlaceholderForms(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := runFixtureCase(t, "multidoc-target.yaml", "multidoc-doc0.yaml", c.dataFile)
+			got := runFixtureCase(t, "multidoc-source.yaml", "multidoc-doc0.yaml", c.dataFile)
 			assertGolden(t, got, "multidoc-expected.yaml")
 		})
 	}

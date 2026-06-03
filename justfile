@@ -39,8 +39,8 @@ test-int: build
 
     for f in test/fixtures/*-expected.yaml; do
         name=$(basename "$f" -expected.yaml)
-        target="test/fixtures/${name}-target.yaml"
-        if [[ ! -f "$target" ]]; then continue; fi
+        source="test/fixtures/${name}-source.yaml"
+        if [[ ! -f "$source" ]]; then continue; fi
 
         data=()
         if [[ -f "test/fixtures/${name}-data.yaml" ]]; then
@@ -54,7 +54,7 @@ test-int: build
         fi
 
         echo -n "Testing $name... " >&2
-        if result=$("$bin" "${data[@]}" < "$target") && [[ "$result" == "$(cat "$f")" ]]; then
+        if result=$("$bin" "${data[@]}" < "$source") && [[ "$result" == "$(cat "$f")" ]]; then
             echo "✓ PASS" >&2
         else
             echo "✗ FAIL" >&2

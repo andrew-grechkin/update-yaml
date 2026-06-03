@@ -513,14 +513,14 @@ func updateExistingEntries(
 // wrapper is restored on return and its Value field still points to the
 // (now-mutated) inner mapping, so the binding survives.
 func applyValue(file *ast.File, mv *ast.MappingValueNode, val any, childPath string) error {
-	targetVal, restore := unwrapAnchor(mv)
+	sourceVal, restore := unwrapAnchor(mv)
 	defer restore()
 
-	if subMap, ok := val.(yaml.MapSlice); ok && mappingValues(targetVal) != nil {
-		return updateAtNode(file, targetVal, childPath, subMap)
+	if subMap, ok := val.(yaml.MapSlice); ok && mappingValues(sourceVal) != nil {
+		return updateAtNode(file, sourceVal, childPath, subMap)
 	}
 	seqIndent := true
-	if seq, ok := targetVal.(*ast.SequenceNode); ok {
+	if seq, ok := sourceVal.(*ast.SequenceNode); ok {
 		if _, ok := val.([]any); ok && !seq.IsFlowStyle && len(seq.Values) > 0 {
 			seqIndent = seq.Start.Position.Column > mv.Key.GetToken().Position.Column
 		}

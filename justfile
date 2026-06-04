@@ -1,22 +1,25 @@
 #!/usr/bin/env -S just --one --justfile
 
+export tool := 'update-yaml'
+
 # Build the binary to cache directory
-@build:
+@build: fix
     go build -o "$XDG_CACHE_HOME/go/bin/"
 
 # Install the binary globally
 @install:
-    go install update-yaml
+    go install "$tool"
 
 # Format Go source code
 @fix:
     go fmt
+    go fix
 
 # Run Go linter
 @lint: cc
     go vet
 
-# Report functions over cyclomatic complexity 10 (installs gocyclo if missing)
+# Report functions over cyclomatic complexity 15 (installs gocyclo if missing)
 @cc:
     test -x "$XDG_CACHE_HOME/go/bin/gocyclo" || GOBIN="$XDG_CACHE_HOME/go/bin" go install github.com/fzipp/gocyclo/cmd/gocyclo@latest
     "$XDG_CACHE_HOME/go/bin/gocyclo" -over 15 .
@@ -32,10 +35,9 @@
 
 # Run integration tests by driving the binary against fixtures
 test-int: build
-    #!/usr/bin/env bash
-    set -Eeuo pipefail
+    #!/usr/bin/env -S bash -Eeuo pipefail
 
-    bin="${GOBIN:-${GOPATH:-$HOME/go}/bin}/update-yaml"
+    bin="${GOBIN:-${GOPATH:-$HOME/go}/bin}/$tool"
 
     for f in test/fixtures/*-expected.yaml; do
         name=$(basename "$f" -expected.yaml)
@@ -63,4 +65,4 @@ test-int: build
     done
 
 # Run all tests
-test: test-unit test-int
+test: lint test-unit test-int

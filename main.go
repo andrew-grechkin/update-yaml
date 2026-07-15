@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	crypto_rand "crypto/rand"
 	_ "embed"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -62,6 +64,14 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 			return printHelp(stdout)
 		}
 	}
+
+	var nonce [8]byte
+	if _, err := crypto_rand.Read(nonce[:]); err != nil {
+		return fmt.Errorf("nonce: %w", err)
+	}
+	blockNonce = hex.EncodeToString(nonce[:])
+	pendingBlocks = nil
+	pendingSplices = nil
 
 	stdinBytes, err := io.ReadAll(stdin)
 	if err != nil {
@@ -126,7 +136,9 @@ func applyMergedDocs(file *ast.File, mergedDocs []yaml.MapSlice) error {
 		if err := updateAtNode(scoped, doc.Body, "$", mergedDocs[i]); err != nil {
 			return err
 		}
+		preserveKeepChompBlocks(doc.Body)
 	}
+	finalizeBlockPlaceholders()
 	return nil
 }
 
@@ -169,6 +181,42 @@ type style struct {
 // marshalling helpers below. Package-level because run isn't reentrant; same
 // pattern as the env var reads.
 var detectedStyle = style{indent: 2}
+
+// maxLineWidth is the visible-column budget a single record must fit into
+// for the value to stay in plain form. Over the budget, block scalars kick in
+// (with the exceptions in chooseBlockStyle).
+const maxLineWidth = 120
+
+type blockChoice struct {
+	folded bool // true = `>`, false = `|`
+	chomp  byte // '-', 0 (clip / default), or '+'
+}
+
+// pendingBlocks maps unique placeholders to the pre-formatted block-scalar
+// bytes that must be spliced into their positions after the AST is rendered.
+// Goccy's LiteralNode round-trip drops trailing blank lines under `|+`/`>+`
+// and never emits `>` on its own, so we sidestep its serializer entirely for
+// block-form values: replace with a plain-scalar placeholder, then swap the
+// placeholder for the correct block scalar in the final byte stream.
+var pendingBlocks map[string]string
+
+// blockNonce is a per-run random token that guards the placeholder namespace
+// against colliding with strings in the source. Regenerated in run() so unit
+// tests inside a single process don't share tokens across invocations.
+var blockNonce string
+
+// pendingSplices records the token-chain edits that must happen AFTER
+// removeMarkedEntries. Rewiring the chain earlier confuses the removal pass's
+// hasLeadingBlankBeforeEntry check: the deleted entry's key.Prev would then
+// point at our placeholder rather than the natural source predecessor, and
+// the check misreads the source's blank-line intent.
+type pendingSplice struct {
+	first, last *token.Token
+	placeholder *token.Token
+	bytesCount  int // \n count in the block bytes, drives placeholder Line
+}
+
+var pendingSplices []pendingSplice
 
 // detectStyle uses first-occurrence wins: first parent->child mapping pair
 // determines indent step, first explicitly-quoted string determines quote
@@ -226,6 +274,337 @@ func findFirstQuote(n ast.Node) token.Type {
 	return token.UnknownType
 }
 
+// chooseBlockStyle applies the presentation rule for a string value: block
+// form when the plain rendering would exceed maxLineWidth, or when the value
+// carries newlines that plain form cannot represent. Three exceptions fall
+// back to whatever goccy would emit (plain or single-quoted):
+//   - leading whitespace: block scalars strip it
+//   - trailing whitespace on the last content line: block scalars strip it too
+//   - no whitespace anywhere: nothing to fold on
+//
+// Returns (nil, ...) when goccy should handle it; otherwise the folded/chomp
+// choice governs the raw bytes we splice.
+func chooseBlockStyle(s, key string, keyCol int) *blockChoice {
+	if hasLeadingScalarWS(s) || hasTrailingScalarWS(strings.TrimRight(s, "\n")) {
+		return nil
+	}
+	trimmed := strings.TrimRight(s, "\n")
+	trailNL := len(s) - len(trimmed)
+	hasMidNL := strings.Contains(trimmed, "\n")
+	hasFoldSpace := strings.ContainsAny(trimmed, " \t")
+
+	plainLen := plainRecordLen(s, key, keyCol)
+	if !hasMidNL && trailNL == 0 {
+		if !hasFoldSpace {
+			return nil // no fold point available
+		}
+		if plainLen <= maxLineWidth {
+			return nil // fits as plain
+		}
+	}
+
+	// `>` folded is only useful when content actually needs wrapping: it must
+	// be a single logical line whose plain rendering exceeds maxLineWidth and
+	// has whitespace to break at. Otherwise `|` literal keeps the source shape
+	// without folding surprises.
+	c := blockChoice{folded: !hasMidNL && hasFoldSpace && plainLen > maxLineWidth}
+	switch {
+	case trailNL == 0:
+		c.chomp = '-'
+	case trailNL >= 2:
+		c.chomp = '+'
+	}
+	return &c
+}
+
+func hasLeadingScalarWS(s string) bool {
+	return s != "" && (s[0] == ' ' || s[0] == '\t')
+}
+
+func hasTrailingScalarWS(trimmed string) bool {
+	if trimmed == "" {
+		return false
+	}
+	c := trimmed[len(trimmed)-1]
+	return c == ' ' || c == '\t'
+}
+
+// plainRecordLen estimates the total column count of a `<indent><key>: <value>`
+// record if `s` were emitted as a plain scalar (quoted where content forces
+// quoting). Used only to compare against maxLineWidth; exact goccy escaping
+// isn't needed because block form is picked well before quoting subtleties
+// change the answer.
+func plainRecordLen(s, key string, keyCol int) int {
+	valLen := len(s)
+	if needsQuoting(s) {
+		valLen += 2
+	}
+	return (keyCol - 1) + len(key) + len(": ") + valLen
+}
+
+// needsQuoting reports whether goccy would emit a plain scalar wrapped in
+// quotes. The list matches the plain-scalar restrictions in the YAML 1.2 spec
+// closely enough for width estimation - values that trip a subtle case here
+// only get 2 chars mis-estimated, which changes the plain-vs-block decision
+// only at the exact 120/122 boundary.
+func needsQuoting(s string) bool {
+	if s == "" {
+		return true
+	}
+	switch s[0] {
+	case ' ', '\t', '-', '?', ':', ',', '[', ']', '{', '}', '#', '&', '*', '!', '|', '>', '\'', '"', '%', '@', '`':
+		return true
+	}
+	last := s[len(s)-1]
+	if last == ' ' || last == '\t' || last == ':' {
+		return true
+	}
+	if strings.Contains(s, ": ") || strings.Contains(s, " #") {
+		return true
+	}
+	switch strings.ToLower(s) {
+	case "true", "false", "null", "yes", "no", "on", "off", "~":
+		return true
+	}
+	return false
+}
+
+// buildBlockScalar produces the raw bytes for a `|`/`>` scalar with the given
+// chomp, indented for a value at the target column. The result includes the
+// header line and content lines but NO trailing newline: the surrounding
+// placeholder line's newline provides the terminator when we splice.
+func buildBlockScalar(s string, c blockChoice, keyCol int) string {
+	trimmed := strings.TrimRight(s, "\n")
+	trailNL := len(s) - len(trimmed)
+	contentIndent := strings.Repeat(" ", (keyCol-1)+detectedStyle.indent)
+
+	var header strings.Builder
+	if c.folded {
+		header.WriteByte('>')
+	} else {
+		header.WriteByte('|')
+	}
+	if c.chomp != 0 {
+		header.WriteByte(c.chomp)
+	}
+
+	var lines []string
+	if c.folded {
+		lines = foldWrap(trimmed, max(1, maxLineWidth-len(contentIndent)))
+	} else {
+		lines = strings.Split(trimmed, "\n")
+	}
+
+	var sb strings.Builder
+	sb.WriteString(header.String())
+	for _, ln := range lines {
+		sb.WriteByte('\n')
+		if ln != "" {
+			sb.WriteString(contentIndent)
+			sb.WriteString(ln)
+		}
+	}
+	// Emit (trailNL - 1) additional bare newlines when chomp keeps trailing
+	// blanks. The `-1` accounts for the placeholder line's own newline, which
+	// contributes the last one after splicing.
+	if c.chomp == '+' && trailNL >= 2 {
+		for i := 0; i < trailNL-1; i++ {
+			sb.WriteByte('\n')
+		}
+	}
+	return sb.String()
+}
+
+// foldWrap breaks `s` into lines no wider than `width`. It first splits into
+// "atoms": maximal substrings joined only by multi-space runs. Only the
+// single-space gaps between atoms are wrap-safe - breaking inside a
+// multi-space run would leave a line beginning with whitespace, which
+// folded-scalar semantics treat as a "more indented" line and preserve the
+// newline instead of folding to a space.
+func foldWrap(s string, width int) []string {
+	if s == "" || width < 1 {
+		return []string{s}
+	}
+	atoms := splitFoldAtoms(s)
+	var lines []string
+	var cur strings.Builder
+	for _, a := range atoms {
+		if cur.Len() == 0 {
+			cur.WriteString(a)
+			continue
+		}
+		if cur.Len()+1+len(a) <= width {
+			cur.WriteByte(' ')
+			cur.WriteString(a)
+			continue
+		}
+		lines = append(lines, cur.String())
+		cur.Reset()
+		cur.WriteString(a)
+	}
+	lines = append(lines, cur.String())
+	return lines
+}
+
+// splitFoldAtoms splits `s` on single-space boundaries only. Runs of two or
+// more spaces stay inside the surrounding atom, so the wrapper never picks
+// a break point that would split a multi-space region.
+func splitFoldAtoms(s string) []string {
+	var atoms []string
+	var cur strings.Builder
+	i := 0
+	for i < len(s) {
+		if s[i] != ' ' {
+			cur.WriteByte(s[i])
+			i++
+			continue
+		}
+		j := i
+		for j < len(s) && s[j] == ' ' {
+			j++
+		}
+		if j-i == 1 {
+			atoms = append(atoms, cur.String())
+			cur.Reset()
+		} else {
+			cur.WriteString(s[i:j])
+		}
+		i = j
+	}
+	atoms = append(atoms, cur.String())
+	return atoms
+}
+
+// stageBlockScalar registers a placeholder for later byte-level substitution
+// and returns it as a plain scalar goccy can round-trip without quoting.
+func stageBlockScalar(bytesToSplice string) string {
+	if pendingBlocks == nil {
+		pendingBlocks = make(map[string]string)
+	}
+	ph := fmt.Sprintf("__uy_%s_%d__", blockNonce, len(pendingBlocks))
+	pendingBlocks[ph] = bytesToSplice
+	return ph
+}
+
+// installBlockPlaceholder swaps the value at `mv` for a plain-scalar
+// placeholder whose bytes are substituted for `blockBytes` after render.
+// The token-chain splice is deferred to finalizeBlockPlaceholders so it
+// doesn't run before removeMarkedEntries reads the source token layout.
+func installBlockPlaceholder(mv *ast.MappingValueNode, blockBytes string) {
+	first, last := scalarTokenSpan(mv.Value)
+	sn := newPlaceholderNode(stageBlockScalar(blockBytes))
+	if sn == nil {
+		return
+	}
+	pendingSplices = append(pendingSplices, pendingSplice{
+		first:       first,
+		last:        last,
+		placeholder: sn.Token,
+		bytesCount:  strings.Count(blockBytes, "\n"),
+	})
+	mv.Value = sn
+}
+
+// finalizeBlockPlaceholders replays the recorded splices after every AST
+// mutation is settled. Position is set to first.Line + newline count in the
+// block bytes - the line where the block scalar's last content line lands
+// in the output. That value keeps goccy's checkLineBreak crediting the
+// multi-line span correctly, so an inter-record blank fires only when the
+// source had one after the block.
+func finalizeBlockPlaceholders() {
+	for _, s := range pendingSplices {
+		spliceTokens(s.first, s.last, s.placeholder)
+		s.placeholder.Position = &token.Position{
+			Line:        s.first.Position.Line + s.bytesCount,
+			Column:      s.first.Position.Column,
+			IndentNum:   s.first.Position.IndentNum,
+			IndentLevel: s.first.Position.IndentLevel,
+			Offset:      s.first.Position.Offset,
+		}
+	}
+	pendingSplices = nil
+}
+
+// scalarTokenSpan returns the outermost pair of tokens the value node
+// occupies in the source stream. Callers use it to splice a replacement
+// token in without leaving orphan tokens whose Prev/Next still reference
+// the removed node.
+func scalarTokenSpan(n ast.Node) (*token.Token, *token.Token) {
+	switch v := n.(type) {
+	case *ast.LiteralNode:
+		if v.Value == nil {
+			return v.Start, v.Start
+		}
+		return v.Start, v.Value.Token
+	case *ast.StringNode:
+		return v.Token, v.Token
+	}
+	t := n.GetToken()
+	return t, t
+}
+
+func spliceTokens(first, last, replacement *token.Token) {
+	replacement.Prev = first.Prev
+	replacement.Next = last.Next
+	if replacement.Prev != nil {
+		replacement.Prev.Next = replacement
+	}
+	if replacement.Next != nil {
+		replacement.Next.Prev = replacement
+	}
+}
+
+// newPlaceholderNode returns a fresh plain-scalar StringNode carrying
+// `value`. Round-tripping through the parser wires Prev/Next correctly on
+// the internal token so subsequent splicing has a real node to graft.
+func newPlaceholderNode(value string) *ast.StringNode {
+	f, err := parser.ParseBytes([]byte("k: "+value+"\n"), parser.ParseComments)
+	if err != nil {
+		return nil
+	}
+	sn, ok := f.Docs[0].Body.(*ast.MappingNode).Values[0].Value.(*ast.StringNode)
+	if !ok {
+		return nil
+	}
+	return sn
+}
+
+// preserveKeepChompBlocks walks the modified doc's AST and rewrites every
+// `|+`/`>+` LiteralNode as a placeholder plain scalar backed by our own
+// pre-formatted bytes. Goccy's LiteralNode.String() applies a bare
+// TrimRight(origin, "\n") that discards every trailing newline, silently
+// stripping the very content `+` chomp is meant to preserve. Runs after
+// updates so already-swapped values aren't visited twice.
+func preserveKeepChompBlocks(node ast.Node) {
+	switch n := node.(type) {
+	case *ast.MappingNode:
+		for _, mv := range n.Values {
+			preserveKeepChompBlocks(mv)
+		}
+	case *ast.MappingValueNode:
+		if lit, ok := n.Value.(*ast.LiteralNode); ok && isKeepChomp(lit) {
+			c := blockChoice{folded: lit.Start.Value[0] == '>', chomp: '+'}
+			installBlockPlaceholder(n, buildBlockScalar(lit.Value.Value, c, n.Key.GetToken().Position.Column))
+			return
+		}
+		preserveKeepChompBlocks(n.Value)
+	case *ast.SequenceNode:
+		for _, v := range n.Values {
+			preserveKeepChompBlocks(v)
+		}
+	case *ast.AnchorNode:
+		preserveKeepChompBlocks(n.Value)
+	}
+}
+
+func isKeepChomp(lit *ast.LiteralNode) bool {
+	if lit.Start == nil || lit.Value == nil {
+		return false
+	}
+	header := strings.TrimSpace(lit.Start.Value)
+	return len(header) >= 2 && header[1] == '+'
+}
+
 func findIndentInNode(n ast.Node) int {
 	mn, ok := n.(*ast.MappingNode)
 	if !ok || mn.IsFlowStyle {
@@ -281,8 +660,18 @@ func writeOutput(stdout io.Writer, file *ast.File, original []byte, modified []b
 		sb.WriteString(parts[i])
 	}
 	sb.WriteByte('\n')
-	_, err := fmt.Fprint(stdout, sb.String())
+	out := substitutePendingBlocks(sb.String())
+	_, err := fmt.Fprint(stdout, out)
 	return err
+}
+
+// substitutePendingBlocks swaps each placeholder plain scalar for the raw
+// block-scalar bytes we staged in applyValue. Empty is a no-op.
+func substitutePendingBlocks(s string) string {
+	for ph, block := range pendingBlocks {
+		s = strings.Replace(s, ph, block, 1)
+	}
+	return s
 }
 
 // blanksBeforeDoc counts consecutive blank source lines immediately above
@@ -519,6 +908,13 @@ func applyValue(file *ast.File, mv *ast.MappingValueNode, val any, childPath str
 	if subMap, ok := val.(yaml.MapSlice); ok && mappingValues(sourceVal) != nil {
 		return updateAtNode(file, sourceVal, childPath, subMap)
 	}
+	if s, ok := val.(string); ok {
+		keyCol := mv.Key.GetToken().Position.Column
+		if c := chooseBlockStyle(s, keyString(mv.Key), keyCol); c != nil {
+			installBlockPlaceholder(mv, buildBlockScalar(s, *c, keyCol))
+			return nil
+		}
+	}
 	seqIndent := true
 	if seq, ok := sourceVal.(*ast.SequenceNode); ok {
 		if _, ok := val.([]any); ok && !seq.IsFlowStyle && len(seq.Values) > 0 {
@@ -545,13 +941,17 @@ func removeMarkedEntries(mn *ast.MappingNode, toRemove map[*ast.MappingValueNode
 		return
 	}
 	filtered := mn.Values[:0]
-	for _, mv := range mn.Values {
+	for i, mv := range mn.Values {
 		if toRemove[mv] {
 			// Goccy attaches the head comment (and its leading blank line)
 			// to the removed node, so dropping the node erases the blank
 			// too. Promote the blank line to a trailing marker on the
-			// previous surviving sibling so it survives as a section break.
-			if hasLeadingBlankLine(mv) && len(filtered) > 0 {
+			// previous surviving sibling so it survives as a section break -
+			// but only when goccy's own token-gap math wouldn't already
+			// render a blank there, or we'd double it up.
+			if hasLeadingBlankBeforeEntry(mv) && len(filtered) > 0 &&
+				!nextSurvivorHasNaturalBlank(mn.Values, i+1, toRemove) &&
+				!prevHasBlockTrailingBlanks(filtered[len(filtered)-1]) {
 				ensureBlankFoot(filtered[len(filtered)-1])
 			}
 			continue
@@ -561,16 +961,81 @@ func removeMarkedEntries(mn *ast.MappingNode, toRemove map[*ast.MappingValueNode
 	mn.Values = filtered
 }
 
-func hasLeadingBlankLine(mv *ast.MappingValueNode) bool {
-	cg := mv.GetComment()
-	if cg == nil || len(cg.Comments) == 0 {
+// prevHasBlockTrailingBlanks reports whether the preceding surviving entry
+// carries a pending block-scalar whose bytes end with a newline - i.e., a
+// `|+`/`>+` with 2+ trailing newlines in its parsed value. The block's own
+// trailing blank lines already serve as the visual record separator, so
+// adding a FootComment blank on top would double it up.
+func prevHasBlockTrailingBlanks(mv *ast.MappingValueNode) bool {
+	sn, ok := mv.Value.(*ast.StringNode)
+	if !ok {
 		return false
 	}
-	tok := cg.Comments[0].Token
-	if tok == nil || tok.Prev == nil {
+	bytes, ok := pendingBlocks[sn.Token.Value]
+	if !ok {
 		return false
 	}
-	return tok.Position.Line-tok.Prev.Position.Line > 1
+	return strings.HasSuffix(bytes, "\n")
+}
+
+// nextSurvivorHasNaturalBlank looks ahead past additional deletions to find
+// the next surviving entry and asks whether goccy's checkLineBreak would
+// insert a blank line above it. When it would, we skip the FootComment
+// promotion; otherwise the blank between records disappears with the removed
+// entry.
+func nextSurvivorHasNaturalBlank(values []*ast.MappingValueNode, from int, toRemove map[*ast.MappingValueNode]bool) bool {
+	for j := from; j < len(values); j++ {
+		if toRemove[values[j]] {
+			continue
+		}
+		return firstTokenHasSourceBlank(values[j])
+	}
+	return false
+}
+
+// firstTokenHasSourceBlank mirrors goccy's checkLineBreak for the first
+// source token of an entry (head comment start if any, else key). Returns
+// true when the raw line gap - after crediting multi-line tokens preceding
+// it - is > 0, matching the exact condition goccy uses to emit a blank.
+func firstTokenHasSourceBlank(mv *ast.MappingValueNode) bool {
+	var t *token.Token
+	if cg := mv.GetComment(); cg != nil && len(cg.Comments) > 0 {
+		t = cg.Comments[0].Token
+	}
+	if t == nil {
+		t = mv.Key.GetToken()
+	}
+	if t == nil || t.Prev == nil {
+		return false
+	}
+	prev := t.Prev
+	lineDiff := t.Position.Line - prev.Position.Line - 1
+	if lineDiff <= 0 {
+		return false
+	}
+	adjustment := 0
+	if prev.Type == token.StringType {
+		adjustment = strings.Count(strings.TrimRight(strings.TrimSpace(prev.Origin), "\n"), "\n")
+	}
+	return lineDiff-adjustment > 0
+}
+
+// hasLeadingBlankBeforeEntry reports whether there is a blank source line
+// immediately preceding this mapping entry - the section break a human uses
+// for visual grouping. The entry's first source token is the head comment's
+// opening line if there is one, else the key line.
+func hasLeadingBlankBeforeEntry(mv *ast.MappingValueNode) bool {
+	var firstTok *token.Token
+	if cg := mv.GetComment(); cg != nil && len(cg.Comments) > 0 {
+		firstTok = cg.Comments[0].Token
+	}
+	if firstTok == nil {
+		firstTok = mv.Key.GetToken()
+	}
+	if firstTok == nil || firstTok.Prev == nil {
+		return false
+	}
+	return firstTok.Position.Line-firstTok.Prev.Position.Line > 1
 }
 
 // ensureBlankFoot uses an empty FootComment as a marker that goccy renders

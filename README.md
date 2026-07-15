@@ -1,7 +1,6 @@
 # update-yaml
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/andrew-grechkin/update-yaml.svg)](https://pkg.go.dev/github.com/andrew-grechkin/update-yaml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/andrew-grechkin/update-yaml)](https://goreportcard.com/report/github.com/andrew-grechkin/update-yaml)
 
 A CLI filter for updating YAML documents from one or more YAML/JSON data files while preserving comments, key order and
 formatting of the original.

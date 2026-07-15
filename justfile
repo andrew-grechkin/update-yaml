@@ -60,6 +60,7 @@ test-int: build
             echo "✓ PASS" >&2
         else
             echo "✗ FAIL" >&2
+            diff -u --label "$f" --label "actual" "$f" <(echo "$result") >&2 || true
             exit 1
         fi
     done

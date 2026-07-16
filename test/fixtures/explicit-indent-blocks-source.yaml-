@@ -1,0 +1,60 @@
+---
+# Explicit-indent block scalar notations: `|+N` / `>+N`, where N is the
+# YAML 1.2 indentation indicator. The source is currently DISABLED (see the
+# `.yaml-` extension); rename to `.yaml` when goccy accepts the notation at
+# parse time. Today, goccy fails at scan with
+#   "invalid number of indent is specified in the multi-line header"
+# regardless of what our render-time wrappers do.
+
+# Literal keep-chomp with explicit indent 2. Content is at column 5 (4
+# leading spaces), so the parsed value has 2 leading spaces per line - the
+# extra indent beyond `+2` becomes part of the value.
+lit2_d: |+2
+    hello world
+lit2_k: |+2
+    hello world
+lit2_u: |+2
+    hello world
+
+# Literal keep-chomp with explicit indent 2, two trailing newlines
+lit2_multi_d: |+2
+    line one
+    line two
+
+
+lit2_multi_k: |+2
+    line one
+    line two
+
+
+lit2_multi_u: |+2
+    line one
+    line two
+
+
+# Folded keep-chomp with explicit indent 4. Content at column 7 (6 leading
+# spaces), so the parsed value has 2 leading spaces per line - and folded
+# semantics join adjacent non-empty lines with a single space.
+fold4_d: >+4
+      hello world
+fold4_k: >+4
+      hello world
+fold4_u: >+4
+      hello world
+
+# Folded keep-chomp with explicit indent 4, two trailing newlines
+fold4_multi_d: >+4
+      folded one
+      folded two
+
+
+fold4_multi_k: >+4
+      folded one
+      folded two
+
+
+fold4_multi_u: >+4
+      folded one
+      folded two
+
+

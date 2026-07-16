@@ -1,0 +1,15 @@
+---
+# Delete: null removes the key entirely.
+lit2_d: null
+lit2_multi_d: null
+fold4_d: null
+fold4_multi_d: null
+
+# Update: replace with new content. Note that the tool's ValueToNode path
+# emits standard `|+` / `>+` (no explicit N) - so `|+2` values coming in
+# leave via `|+`. That's expected; the explicit-N form is a lossless-parse
+# concern, not a round-trip one.
+lit2_u: "replaced\n\n"
+lit2_multi_u: "replaced line one\nreplaced line two\n\n\n"
+fold4_u: "replaced folded\n\n"
+fold4_multi_u: "replaced folded line one\nreplaced folded line two\n\n\n"

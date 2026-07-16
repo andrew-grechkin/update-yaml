@@ -1,0 +1,38 @@
+---
+# Kept entries preserve the source's explicit-N header via
+# LiteralNode.String() (goccy uses n.Start.Value verbatim for the header).
+# Updated entries get the tool's own `|+` / `>+` output via ValueToNode.
+
+lit2_k: |+2
+    hello world
+lit2_u: |+
+  replaced
+
+
+lit2_multi_k: |+2
+    line one
+    line two
+
+
+lit2_multi_u: |+
+  replaced line one
+  replaced line two
+
+
+
+fold4_k: >+4
+      hello world
+fold4_u: |+
+  replaced folded
+
+
+fold4_multi_k: >+4
+      folded one
+      folded two
+
+
+fold4_multi_u: |+
+  replaced folded line one
+  replaced folded line two
+
+

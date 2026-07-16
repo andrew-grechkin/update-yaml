@@ -1,7 +1,6 @@
 # update-yaml
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/andrew-grechkin/update-yaml.svg)](https://pkg.go.dev/github.com/andrew-grechkin/update-yaml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/andrew-grechkin/update-yaml)](https://goreportcard.com/report/github.com/andrew-grechkin/update-yaml)
 
 A CLI filter for updating YAML documents from one or more YAML/JSON data files while preserving comments, key order and
 formatting of the original.
@@ -257,6 +256,15 @@ real: updates for the second doc in the input
 - **1**: Parse errors, invalid input, doc count mismatch, or other runtime errors
 
 ## GOTCHAS
+
+### [`github.com/goccy/go-yaml`](https://github.com/goccy/go-yaml/pulls) is FULL of bugs and poorly maintained
+
+One can see that there are dozens of pull requests fixing bugs in the library. Maintainers seem just ignore them and
+nothing is being fixed for a long time.
+
+This is a bitter irony because author claimed one of the reasons for this library to exist is [poorly maintained](https://github.com/goccy/go-yaml#why-a-new-library) `go-yaml/yaml`.
+
+I'm trying to workaround some of the bugs in my code, but of course something can slip in.
 
 ### Consecutive `---` markers collapse into one document
 

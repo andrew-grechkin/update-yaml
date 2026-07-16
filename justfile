@@ -24,6 +24,16 @@ export tool := 'update-yaml'
     test -x "$XDG_CACHE_HOME/go/bin/gocyclo" || GOBIN="$XDG_CACHE_HOME/go/bin" go install github.com/fzipp/gocyclo/cmd/gocyclo@latest
     "$XDG_CACHE_HOME/go/bin/gocyclo" -over 15 .
 
+probe: fix
+    #!/usr/bin/env -S bash -Eeuo pipefail
+    bin="${GOBIN:-${GOPATH:-$HOME/go}/bin}/$tool"
+    go build -tags debug -o "$bin"
+    source=$'---\nhash:\n  very_long_base_key:\n    a: old value # some comment\n\n    very_long_subkey_b: word\n    # separate key\n    c: "42"\n'
+    data=$'---\nhash:\n  very_long_base_key:\n    very_long_subkey_b: |+\n      43\n\n...\n'
+    # data=$'---\nhash:\n  b: >\n    hello world\n'
+    # data=$'---\nhash:\n  a: |+\n    multi\n    line\n\n\n  b: >\n    hello world\n  c: just words'
+    "$bin" <<< "$source" <(echo "$data")
+
 # Update Go dependencies
 @update:
     go get -u
@@ -38,6 +48,7 @@ test-int: build
     #!/usr/bin/env -S bash -Eeuo pipefail
 
     bin="${GOBIN:-${GOPATH:-$HOME/go}/bin}/$tool"
+    failures=0
 
     for f in test/fixtures/*-expected.yaml; do
         name=$(basename "$f" -expected.yaml)
@@ -60,9 +71,15 @@ test-int: build
             echo "✓ PASS" >&2
         else
             echo "✗ FAIL" >&2
-            exit 1
+            diff -u --label "$f" --label "actual" "$f" <(echo "$result") >&2 || true
+            failures=$((failures + 1))
         fi
     done
+
+    if (( failures > 0 )); then
+        echo "$failures fixture(s) failed" >&2
+        exit 1
+    fi
 
 # Run all tests
 test: lint test-unit test-int

@@ -486,6 +486,7 @@ func updateExistingEntries(
 ) (map[string]bool, map[*ast.MappingValueNode]bool, error) {
 	seen := make(map[string]bool, len(data))
 	toRemove := make(map[*ast.MappingValueNode]bool)
+
 	for _, mv := range mappingValues(node) {
 		key := keyString(mv.Key)
 		if key == "" {
@@ -504,14 +505,15 @@ func updateExistingEntries(
 			return nil, nil, err
 		}
 	}
+
 	return seen, toRemove, nil
 }
 
-// applyValue: the seqIndent dance preserves the source's flush vs.
-// extra-indented sequence style on replace. AnchorNode wrappers are
-// temporarily unwrapped because yaml.Path can't navigate through them; the
-// wrapper is restored on return and its Value field still points to the
-// (now-mutated) inner mapping, so the binding survives.
+// applyValue: recurses on mapping-vs-mapping and delegates all other
+// replacements to replaceAt. AnchorNode wrappers are temporarily unwrapped
+// because yaml.Path can't navigate through them; the wrapper is restored on
+// return and its Value field still points to the (now-mutated) inner
+// mapping, so the binding survives.
 func applyValue(file *ast.File, mv *ast.MappingValueNode, val any, childPath string) error {
 	sourceVal, restore := unwrapAnchor(mv)
 	defer restore()
@@ -519,13 +521,8 @@ func applyValue(file *ast.File, mv *ast.MappingValueNode, val any, childPath str
 	if subMap, ok := val.(yaml.MapSlice); ok && mappingValues(sourceVal) != nil {
 		return updateAtNode(file, sourceVal, childPath, subMap)
 	}
-	seqIndent := true
-	if seq, ok := sourceVal.(*ast.SequenceNode); ok {
-		if _, ok := val.([]any); ok && !seq.IsFlowStyle && len(seq.Values) > 0 {
-			seqIndent = seq.Start.Position.Column > mv.Key.GetToken().Position.Column
-		}
-	}
-	if err := replaceAt(file, childPath, val, seqIndent); err != nil {
+	keyTok := mv.Key.GetToken()
+	if err := replaceAt(file, childPath, val, keyTok.Position.Column, keyTok.Position.IndentLevel); err != nil {
 		return fmt.Errorf("replacing %s: %w", childPath, err)
 	}
 	return nil
@@ -561,12 +558,18 @@ func removeMarkedEntries(mn *ast.MappingNode, toRemove map[*ast.MappingValueNode
 	mn.Values = filtered
 }
 
+// hasLeadingBlankLine reports whether the source had a blank line immediately
+// above this entry. The entry's first source token is the head comment's
+// opening token if there is one, else the key token; either way, a gap of
+// more than one line to its Prev means an intervening blank line - the
+// section break we want to keep across a removal.
 func hasLeadingBlankLine(mv *ast.MappingValueNode) bool {
-	cg := mv.GetComment()
-	if cg == nil || len(cg.Comments) == 0 {
-		return false
+	var tok *token.Token
+	if cg := mv.GetComment(); cg != nil && len(cg.Comments) > 0 {
+		tok = cg.Comments[0].Token
+	} else {
+		tok = mv.Key.GetToken()
 	}
-	tok := cg.Comments[0].Token
 	if tok == nil || tok.Prev == nil {
 		return false
 	}
@@ -725,45 +728,130 @@ func isIdentRune(r rune, isFirst bool) bool {
 }
 
 // replaceAt preserves the inline/trailing comment and explicit quote style
-// across the swap; goccy's ReplaceWithReader otherwise drops the trailing
-// comment and re-quotes scalars using its own heuristics.
-func replaceAt(file *ast.File, path string, val any, seqIndent bool) error {
-	out, err := yaml.MarshalWithOptions(
-		val,
-		yaml.Indent(detectedStyle.indent),
-		yaml.IndentSequence(seqIndent),
-		yaml.UseSingleQuote(detectedStyle.singleQuote),
-	)
-	if err != nil {
-		return fmt.Errorf("marshalling new value: %w", err)
-	}
+// across the swap; goccy's ReplaceWithNode otherwise drops the trailing
+// comment and re-quotes scalars using its own heuristics. Sequence-indent
+// style (flush vs. extra-indented) is also carried over from the source, so
+// we don't churn whitespace on lists the caller didn't ask to reshape.
+//
+// keyCol/keyIndent are the source column and indent level of the mapping key
+// this value belongs to. Pass -1 for either when the caller doesn't have the
+// mapping context (e.g. sequence entries); alignment patching is skipped in
+// that case.
+func replaceAt(file *ast.File, path string, val any, keyCol, keyIndent int) error {
 	p, err := yaml.PathString(path)
 	if err != nil {
 		return fmt.Errorf("invalid path %s: %w", path, err)
 	}
+	traceKey(keyCol, keyIndent)
+	ctx := snapshotBeforeReplace(p, file, val, keyCol)
+	traceValue("INPUT", val)
 
-	var (
-		savedComment *ast.CommentGroupNode
-		savedQuote   token.Type
+	// TODO: use node from data directly.
+	newNode, err := yaml.ValueToNode(val,
+		yaml.Indent(detectedStyle.indent),
+		yaml.IndentSequence(ctx.seqIndent),
+		yaml.UseSingleQuote(ctx.preferSingle),
+		yaml.UseLiteralStyleIfMultiline(true),
 	)
-	if n := nodeAt(p, file); n != nil {
-		savedComment = n.GetComment()
-		if s, ok := n.(*ast.StringNode); ok {
-			savedQuote = s.Token.Type
-		}
+	if err != nil {
+		return fmt.Errorf("marshalling new value: %w", err)
 	}
-	if err := p.ReplaceWithReader(file, bytes.NewReader(out)); err != nil {
+	traceNode("NEW NODE", newNode)
+
+	if err := p.ReplaceWithNode(file, newNode); err != nil {
 		return err
 	}
-	if n := nodeAt(p, file); n != nil {
-		if savedComment != nil {
-			_ = n.SetComment(savedComment)
+	restoreAfterReplace(p, file, ctx, keyCol, keyIndent)
+	return nil
+}
+
+// replaceContext carries the pre-swap state that has to survive across
+// goccy's ReplaceWithNode: the comment we intend to reattach, plus the
+// encoding preferences (single-quote vs. double, sequence indent style)
+// inferred from the source node's shape. Those preferences are handed to
+// goccy at node-creation time - swapping a StringNode's Token.Type
+// post-marshal would corrupt any content that relied on the original quote
+// style's escaping rules (e.g. `"line\n"` -> `'line\n'` would turn the
+// escape into a literal backslash-n).
+type replaceContext struct {
+	savedComment *ast.CommentGroupNode
+	preferSingle bool
+	seqIndent    bool
+}
+
+// snapshotBeforeReplace inspects the node currently at `p` and captures
+// everything replaceAt needs after the swap. `seqIndent` defaults to true
+// (goccy's own default) and only flips when the source is a block-style
+// sequence flush against the parent key. `preferSingle` follows the source
+// scalar's own quote style when it's explicitly quoted, otherwise falls
+// back to the file-level detection.
+func snapshotBeforeReplace(p *yaml.Path, file *ast.File, val any, keyCol int) replaceContext {
+	ctx := replaceContext{
+		seqIndent:    true,
+		preferSingle: detectedStyle.singleQuote,
+	}
+	n := nodeAt(p, file)
+	if n == nil {
+		return ctx
+	}
+	traceNode("OLD VALUE", n)
+	ctx.savedComment = n.GetComment()
+	switch v := n.(type) {
+	case *ast.StringNode:
+		switch v.Token.Type {
+		case token.SingleQuoteType:
+			ctx.preferSingle = true
+		case token.DoubleQuoteType:
+			ctx.preferSingle = false
 		}
-		if s, ok := n.(*ast.StringNode); ok && isExplicitQuote(savedQuote) && isExplicitQuote(s.Token.Type) {
-			s.Token.Type = savedQuote
+	case *ast.SequenceNode:
+		if _, ok := val.([]any); ok && !v.IsFlowStyle && len(v.Values) > 0 && keyCol > 0 {
+			ctx.seqIndent = v.Start.Position.Column > keyCol
 		}
 	}
-	return nil
+	return ctx
+}
+
+// restoreAfterReplace reattaches the pre-swap comment and re-aligns the new
+// value token to the parent key's column. Skipping the alignment step when
+// keyCol/keyIndent are -1 lets callers without mapping context (e.g. a
+// hypothetical sequence-entry replacement) opt out cleanly. Quote style is
+// already handled at marshal time via ctx.preferSingle, so nothing to
+// restore here for that.
+func restoreAfterReplace(p *yaml.Path, file *ast.File, ctx replaceContext, keyCol, keyIndent int) {
+	n := nodeAt(p, file)
+	if n == nil {
+		return
+	}
+	if keyCol >= 0 && keyIndent >= 0 {
+		// Workaround: goccy's ReplaceWithNode drops the parent key's indent
+		// context for multi-line values, so we re-align the content token to
+		// the key's column ourselves.
+		realignToKey(n, keyCol, keyIndent)
+	}
+	if ctx.savedComment != nil {
+		_ = n.SetComment(ctx.savedComment)
+	}
+	traceNode("NEW VALUE", n)
+}
+
+// realignToKey pushes the new value token's column/indent back onto the
+// parent key's alignment. `>` / `|` block scalars land inside a LiteralNode
+// whose Value holds the content token; plain/quoted values land directly in
+// a StringNode. Any other node type has no scalar column to patch.
+func realignToKey(n ast.Node, keyCol, keyIndent int) {
+	var tok *token.Token
+	switch v := n.(type) {
+	case *ast.LiteralNode:
+		tok = v.Value.Token
+	case *ast.StringNode:
+		tok = v.Token
+	}
+	if tok == nil {
+		return
+	}
+	tok.Position.Column = keyCol
+	tok.Position.IndentLevel = keyIndent
 }
 
 func nodeAt(p *yaml.Path, file *ast.File) ast.Node {

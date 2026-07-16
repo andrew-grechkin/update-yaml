@@ -1,0 +1,128 @@
+---
+hash:
+  already_folded_d: >-
+    This scalar is already emitted as folded style by the author;
+    the pass leaves it untouched even though the wrap boundaries
+    may not be optimal.
+  # data uses `>-`
+  already_folded_k: >-
+    This scalar is already emitted as folded style by the author;
+    the pass leaves it untouched even though the wrap boundaries
+    may not be optimal.
+  already_folded_u: to update
+
+  at_line_width_d: aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aa
+  # exactly at the line width. Must stay plain (no overflow)
+  at_line_width_k: aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aa
+  at_line_width_u: to update
+
+  basic_long_d: >-
+    This is a very long single-line description that clearly exceeds the line width and should be broken into multiple
+    lines to improve readability of the YAML file.
+  # basic long single-line
+  basic_long_k: >-
+    This is a very long single-line description that clearly exceeds the line width and should be broken into multiple
+    lines to improve readability of the YAML file.
+  basic_long_u: to update
+
+  interior_colon_d: >-
+    This: is a long description containing a colon that continues past the line width to force the fold logic to kick in
+  # content with a colon in the middle
+  interior_colon_k: >-
+    This: is a long description containing a colon that continues past the line width to force the fold logic to kick in
+  interior_colon_u: to update
+
+  interior_double_space_d: >
+    This is a long description that includes a hello  world double-space region which must survive intact across every
+    wrap of the folded scalar output.
+  # interior double-space run
+  interior_double_space_k: >
+    This is a long description that includes a hello  world double-space region which must survive intact across every
+    wrap of the folded scalar output.
+  interior_double_space_u: to update
+
+  interior_tab_d: >+
+    This is a long description that contains a literal	tab character in the middle and continues past the line width to
+    trigger the fold.
+  # interior tab
+  interior_tab_k: >+
+    This is a long description that contains a literal	tab character in the middle and continues past the line width to
+    trigger the fold.
+  interior_tab_u: to update
+
+  leading_dash_d: >
+    - but I really wanted to start with a dash and the sentence goes on and on and on and on past the line width so
+    folding is triggered
+  # content starting with a dash
+  leading_dash_k: >
+    - but I really wanted to start with a dash and the sentence goes on and on and on and on past the line width so
+    folding is triggered
+  leading_dash_u: to update
+
+  leading_whitespace_d: '   three leading spaces then the description continues on and on past the line width to force the fold logic to check the guard rail.'
+  # leading whitespace. Must stay plain
+  leading_whitespace_k: '   three leading spaces then the description continues on and on past the line width to force the fold logic to check the guard rail.'
+  leading_whitespace_u: to update
+
+  multi_line_no_trailing_d: |-
+    This line1 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
+    This line2 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
+  # multiline string without trailing new line
+  multi_line_no_trailing_k: |-
+    This line1 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
+    This line2 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
+  multi_line_no_trailing_u: to update
+
+  multi_line_one_trailing_d: |
+    This line1 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
+    This line2 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
+  # multiline string with exactly one trailing new line
+  multi_line_one_trailing_k: |
+    This line1 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
+    This line2 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
+  multi_line_one_trailing_u: to update
+
+  multi_line_many_trailing_d: |+
+    This line1 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
+    This line2 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
+
+  # multiline string with multiple trailing new lines
+  multi_line_many_trailing_k: |+
+    This line1 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
+    This line2 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
+
+
+  multi_line_many_trailing_u: to update
+
+  multi_space_at_wrap1_d: >-
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    cccccccccccccccccccccccc
+  # adjacent multi-space near a natural wrap boundary
+  multi_space_at_wrap1_k: >-
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    cccccccccccccccccccccccc
+  multi_space_at_wrap1_u: to update
+
+  multi_space_at_wrap2_d: >-
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  cccccccccccccccccccccccc
+  # adjacent multi-space on the far side of the wrap boundary
+  multi_space_at_wrap2_k: >-
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  cccccccccccccccccccccccc
+  multi_space_at_wrap2_u: to update
+
+  no_spaces_d: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  # no space characters at all. Must stay plain
+  no_spaces_k: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  no_spaces_u: to update
+
+  short_line_d: This is short.
+  # short single-line value. Under the line width, so no reason to fold
+  short_line_k: This is short.
+  short_line_u: to update
+
+  trailing_whitespace_d: 'the description continues on and on past the configured line width and finishes with two trailing spaces  '
+  # trailing whitespace. Must stay plain
+  trailing_whitespace_k: 'the description continues on and on past the configured line width and finishes with two trailing spaces  '
+  trailing_whitespace_u: to update

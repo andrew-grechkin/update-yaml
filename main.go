@@ -249,21 +249,39 @@ func wrapKeepChompLiteral(lit *ast.LiteralNode) *keepChompLiteral {
 // including empty ones (producing "    \n" instead of "\n") and applies its
 // own TrimSuffix that discards `+` chomp trailing blanks. Ours renders from
 // the parsed value directly so both are preserved.
+// keepChompString stores the raw Go string (`val`) alongside the wrapped
+// node because goccy's StringNode.Value bakes surrounding quotes into the
+// stored string for values that would need quoting in plain form. Reading
+// that back would embed literal quotes inside a block scalar - so we render
+// from the caller-supplied raw value instead. `useFolded` records the
+// header choice made at wrap time so String() doesn't need to re-derive
+// it (and doesn't need to know the key name).
 type keepChompString struct {
 	*ast.StringNode
-	keyCol int
+	val       string
+	keyCol    int
+	useFolded bool
 }
 
 func (n *keepChompString) String() string {
-	val := n.StringNode.Value
-	header := token.LiteralBlockHeader(val)
-	indent := strings.Repeat(" ", n.keyCol-1+detectedStyle.indent)
+	val := n.val
 	trimmed := strings.TrimRight(val, "\n")
 	trailNL := len(val) - len(trimmed)
+	indent := strings.Repeat(" ", n.keyCol-1+detectedStyle.indent)
+
+	var header string
+	var lines []string
+	if n.useFolded {
+		header = foldedHeader(trailNL)
+		lines = foldWrap(trimmed, maxLineWidth-len(indent))
+	} else {
+		header = literalHeader(trailNL)
+		lines = strings.Split(trimmed, "\n")
+	}
 
 	var sb strings.Builder
 	sb.WriteString(header)
-	for line := range strings.SplitSeq(trimmed, "\n") {
+	for _, line := range lines {
 		sb.WriteByte('\n')
 		if line != "" {
 			sb.WriteString(indent)
@@ -279,6 +297,174 @@ func (n *keepChompString) String() string {
 	}
 	return sb.String()
 }
+
+// shouldFold picks `>` (folded) over `|` (literal). `>` only pays off when
+// the content is one paragraph (no mid-newlines) that has whitespace to
+// break at AND whose plain rendering wouldn't fit on one line. Everything
+// else - multi-line values, single-word values, short values - stays `|`.
+func shouldFold(val, keyName string, keyCol int) bool {
+	trimmed := strings.TrimRight(val, "\n")
+	if strings.Contains(trimmed, "\n") {
+		return false
+	}
+	if !strings.ContainsAny(trimmed, " \t") {
+		return false
+	}
+	return plainRecordLen(val, keyName, keyCol) > maxLineWidth
+}
+
+// literalHeader / foldedHeader translate a trailing-newline count into the
+// right chomp indicator for `|`-family and `>`-family block scalars.
+func literalHeader(trailNL int) string {
+	switch trailNL {
+	case 0:
+		return "|-"
+	case 1:
+		return "|"
+	default:
+		return "|+"
+	}
+}
+
+func foldedHeader(trailNL int) string {
+	switch trailNL {
+	case 0:
+		return ">-"
+	case 1:
+		return ">"
+	default:
+		return ">+"
+	}
+}
+
+// shouldWrapStringValue applies the block-form rule for updated string
+// values. Wrap when either:
+//   - value carries embedded newlines (plain can't represent them), or
+//   - value is a single line long enough that its plain-form record exceeds
+//     maxLineWidth AND has whitespace to fold on AND has no leading or
+//     trailing whitespace (block scalars strip both).
+//
+// Anything else stays plain, letting goccy render as it always did.
+//
+// NOTE: two motivations mixed here. The `strings.Contains(val, "\n")`
+// early-return is a monkey-patch for goccy's StringNode multi-line render
+// bugs; when a goccy release ships those fixes, delete that early-return so
+// only the style-selection rule (the long-single-line path) remains active.
+func shouldWrapStringValue(val string, keyCol int, keyName string) bool {
+	if strings.Contains(val, "\n") {
+		return true
+	}
+	if val == "" {
+		return false
+	}
+	if val[0] == ' ' || val[0] == '\t' {
+		return false
+	}
+	if last := val[len(val)-1]; last == ' ' || last == '\t' {
+		return false
+	}
+	if !strings.ContainsAny(val, " \t") {
+		return false
+	}
+	return plainRecordLen(val, keyName, keyCol) > maxLineWidth
+}
+
+// plainRecordLen estimates the record's `<indent><key>: <value>` column
+// count if val were emitted plain (quoted if content demands it). It only
+// has to be exact around the maxLineWidth boundary; a 2-char miss at the
+// quoting decision changes plain-vs-block only at that exact 120/122 edge.
+func plainRecordLen(val, key string, keyCol int) int {
+	valLen := len(val)
+	if needsQuoting(val) {
+		valLen += 2
+	}
+	return (keyCol - 1) + len(key) + len(": ") + valLen
+}
+
+// needsQuoting mirrors goccy's plain-scalar restrictions closely enough for
+// width estimation. Not a substitute for goccy's real quoting decision -
+// only used to size the record for the maxLineWidth comparison.
+func needsQuoting(s string) bool {
+	if s == "" {
+		return true
+	}
+	switch s[0] {
+	case ' ', '\t', '-', '?', ':', ',', '[', ']', '{', '}', '#', '&', '*', '!', '|', '>', '\'', '"', '%', '@', '`':
+		return true
+	}
+	last := s[len(s)-1]
+	if last == ' ' || last == '\t' || last == ':' {
+		return true
+	}
+	if strings.Contains(s, ": ") || strings.Contains(s, " #") {
+		return true
+	}
+	switch strings.ToLower(s) {
+	case "true", "false", "null", "yes", "no", "on", "off", "~":
+		return true
+	}
+	return false
+}
+
+// foldWrap breaks `s` across lines no wider than `width`, splitting only on
+// single spaces. Runs of two or more spaces stay atomic inside a segment -
+// splitting a multi-space run would leave a wrapped line starting with
+// whitespace, which folded-scalar semantics treat as "more indented" and
+// preserve as a literal newline instead of folding to a space.
+func foldWrap(s string, width int) []string {
+	if s == "" || width < 1 {
+		return []string{s}
+	}
+	atoms := splitFoldAtoms(s)
+	var lines []string
+	var cur strings.Builder
+	for _, a := range atoms {
+		if cur.Len() == 0 {
+			cur.WriteString(a)
+			continue
+		}
+		if cur.Len()+1+len(a) <= width {
+			cur.WriteByte(' ')
+			cur.WriteString(a)
+			continue
+		}
+		lines = append(lines, cur.String())
+		cur.Reset()
+		cur.WriteString(a)
+	}
+	lines = append(lines, cur.String())
+	return lines
+}
+
+func splitFoldAtoms(s string) []string {
+	var atoms []string
+	var cur strings.Builder
+	i := 0
+	for i < len(s) {
+		if s[i] != ' ' {
+			cur.WriteByte(s[i])
+			i++
+			continue
+		}
+		j := i
+		for j < len(s) && s[j] == ' ' {
+			j++
+		}
+		if j-i == 1 {
+			atoms = append(atoms, cur.String())
+			cur.Reset()
+		} else {
+			cur.WriteString(s[i:j])
+		}
+		i = j
+	}
+	atoms = append(atoms, cur.String())
+	return atoms
+}
+
+// maxLineWidth is the visible-column budget a record must fit for its value
+// to stay in plain form. Over the budget, block scalars kick in.
+const maxLineWidth = 120
 
 // ensureMappingBody swaps a nil or null doc body for a fresh empty block
 // mapping so subsequent updates have somewhere to land.
@@ -683,22 +869,32 @@ func applyValue(file *ast.File, mv *ast.MappingValueNode, val any, childPath str
 	if err := replaceAt(file, childPath, val, keyCol, keyTok.Position.IndentLevel); err != nil {
 		return fmt.Errorf("replacing %s: %w", childPath, err)
 	}
-	// NOTE: monkey-patch for goccy render bugs. When a goccy release ships
-	// StringNode.String()'s multi-line fixes (indent-on-empty and the
-	// TrimSuffix that eats `+`-chomp trailing blanks), comment out this
-	// whole `if` block to disable it.
+	// NOTE: partially monkey-patch for goccy render bugs. When a goccy
+	// release ships StringNode.String()'s multi-line fixes (indent-on-empty
+	// and the TrimSuffix that eats `+`-chomp trailing blanks), the multi-line
+	// side of this block becomes unnecessary. The long-single-line side
+	// implements the tool's own presentation rule (fold to `>` when a plain
+	// value would exceed maxLineWidth) - keep it either way.
 	//
-	// Data-created multi-line values land as ast.StringNode (via ValueToNode),
-	// whose String() has its own render bugs. Wrap ours so re-render matches
-	// the parsed value; source-parsed StringNodes stay untouched.
-	if s, ok := mv.Value.(*ast.StringNode); ok && strings.Contains(s.Value, "\n") {
-		mv.Value = &keepChompString{StringNode: s, keyCol: keyCol}
-		// Only when our wrapper appends its own trailing blanks (`+` chomp
-		// with 2+ trailing newlines) do we need to suppress goccy's own
-		// checkLineBreak blank; for clip/strip goccy's natural blank between
-		// records is the one we still want to keep.
-		if trailingNewlineCount(s.Value) >= 2 && oldValTok != nil && oldValTok.Position != nil {
-			oldValTok.Position.Line = math.MaxInt32
+	// Data-updated values land as ast.StringNode (via ValueToNode). We wrap
+	// ours to (a) fix goccy's multi-line render bugs and (b) apply the
+	// block-form rule when the plain form would be too long. Source-parsed
+	// StringNodes stay untouched.
+	if rawStr, isStr := val.(string); isStr {
+		if s, ok := mv.Value.(*ast.StringNode); ok && shouldWrapStringValue(rawStr, keyCol, keyString(mv.Key)) {
+			mv.Value = &keepChompString{
+				StringNode: s,
+				val:        rawStr,
+				keyCol:     keyCol,
+				useFolded:  shouldFold(rawStr, keyString(mv.Key), keyCol),
+			}
+			// Only when our wrapper appends its own trailing blanks
+			// (`+` chomp with 2+ trailing newlines) do we need to suppress
+			// goccy's own checkLineBreak blank; for clip/strip goccy's
+			// natural blank between records is the one we still want to keep.
+			if trailingNewlineCount(rawStr) >= 2 && oldValTok != nil && oldValTok.Position != nil {
+				oldValTok.Position.Line = math.MaxInt32
+			}
 		}
 	}
 	return nil

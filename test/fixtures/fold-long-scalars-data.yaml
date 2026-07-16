@@ -5,6 +5,8 @@ hash:
     the wrap boundaries may not be optimal.
   at_line_width_d: null
   at_line_width_u: aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aa
+  at_line_width1_d: null
+  at_line_width1_u: aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aa
   basic_long_d: null
   basic_long_u: This is a very long single-line description that clearly exceeds the line width and should be broken into
     multiple lines to improve readability of the YAML file.

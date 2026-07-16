@@ -16,6 +16,11 @@ hash:
   at_line_width_k: aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aa
   at_line_width_u: to update
 
+  at_line_width1_d: aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aa
+  # at one character more than line width. Must be re-formatted
+  at_line_width1_k: aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aa
+  at_line_width1_u: to update
+
   basic_long_d: >-
     This is a very long single-line description that clearly exceeds the line width and should be broken into multiple
     lines to improve readability of the YAML file.

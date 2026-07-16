@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"runtime/debug"
 	"strings"
@@ -126,8 +127,157 @@ func applyMergedDocs(file *ast.File, mergedDocs []yaml.MapSlice) error {
 		if err := updateAtNode(scoped, doc.Body, "$", mergedDocs[i]); err != nil {
 			return err
 		}
+		// NOTE: monkey-patch for goccy render bugs. When a goccy release ships
+		// the LiteralNode.String() TrimRight-strip fix for `|+`/`>+`, comment
+		// out this line to disable the walker; the wrapper types then become
+		// dead code but harmlessly stay compiled.
+		patchLiteralNodeBugs(doc.Body)
 	}
 	return nil
+}
+
+// patchLiteralNodeBugs walks a modified doc and wraps every `|+`/`>+`
+// LiteralNode so the trailing blank lines the `+` chomp is supposed to keep
+// survive re-render. Goccy's own LiteralNode.String() does a bare
+// TrimRight(origin, "\n") that strips exactly those blanks. The wrapper
+// delegates to goccy for the rest of the render (folded wrap, comments,
+// origin-preserved indent) and just appends the newlines the trim ate.
+//
+// This walker touches source-parsed nodes too - not to change their content,
+// but to prevent goccy from silently dropping content it was asked to keep.
+// The upstream fix is stuck in an unmerged pull request.
+func patchLiteralNodeBugs(node ast.Node) {
+	switch n := node.(type) {
+	case *ast.MappingNode:
+		for _, mv := range n.Values {
+			patchLiteralNodeBugs(mv)
+		}
+	case *ast.MappingValueNode:
+		if lit, ok := n.Value.(*ast.LiteralNode); ok && needsKeepChompFix(lit) {
+			n.Value = wrapKeepChompLiteral(lit)
+			return
+		}
+		patchLiteralNodeBugs(n.Value)
+	case *ast.SequenceNode:
+		for i, v := range n.Values {
+			if lit, ok := v.(*ast.LiteralNode); ok && needsKeepChompFix(lit) {
+				n.Values[i] = wrapKeepChompLiteral(lit)
+				continue
+			}
+			patchLiteralNodeBugs(v)
+		}
+	case *ast.AnchorNode:
+		patchLiteralNodeBugs(n.Value)
+	}
+}
+
+// needsKeepChompFix reports whether goccy's LiteralNode.String() would drop
+// content that `+` chomp is meant to preserve: a `|+`/`>+` header plus a
+// value with more than one trailing newline. `+` with a single trailing
+// newline renders correctly today (goccy strips it, the enclosing join adds
+// one back), so no wrap is needed there.
+func needsKeepChompFix(lit *ast.LiteralNode) bool {
+	if lit.Start == nil || lit.Value == nil {
+		return false
+	}
+	header := strings.TrimSpace(lit.Start.Value)
+	if len(header) < 2 || header[1] != '+' {
+		return false
+	}
+	return trailingNewlineCount(lit.Value.Value) >= 2
+}
+
+func trailingNewlineCount(s string) int {
+	return len(s) - len(strings.TrimRight(s, "\n"))
+}
+
+// lastChainToken returns the last source-token of a value node in the
+// tokenizer's Prev/Next chain - what the following sibling's Key.Prev
+// points at. For a LiteralNode that's the content String's token (Value's
+// GetToken returns the header token, which is not what we want here); for
+// plain and quoted scalars the value node's own GetToken suffices.
+func lastChainToken(n ast.Node) *token.Token {
+	if lit, ok := n.(*ast.LiteralNode); ok && lit.Value != nil {
+		return lit.Value.Token
+	}
+	if n == nil {
+		return nil
+	}
+	return n.GetToken()
+}
+
+// keepChompLiteral wraps a `|+` / `>+` ast.LiteralNode and appends the
+// trailing blank lines goccy's own LiteralNode.String() strips via
+// TrimRight(origin, "\n"). The wrapped base render is otherwise correct
+// (origin-preserved folded wrap, comments, indent), so we delegate to it
+// and only fix the trailing-strip.
+//
+// Wrapping is safe because MappingValueNode.toString() dispatches via the
+// ScalarNode interface (n.Value.String()), so our override fires. Goccy
+// currently only calls the unexported stringWithoutComment on keys, never
+// on values, so the promoted-but-not-overridden method is out of the
+// render path for our purpose.
+type keepChompLiteral struct {
+	*ast.LiteralNode
+}
+
+func (n *keepChompLiteral) String() string {
+	base := n.LiteralNode.String()
+	// -1 because the enclosing MappingNode join adds one newline back.
+	extra := trailingNewlineCount(n.LiteralNode.Value.Value) - 1
+	if extra > 0 {
+		base += strings.Repeat("\n", extra)
+	}
+	return base
+}
+
+// wrapKeepChompLiteral wraps `lit` and pins its content token's source line
+// to MaxInt so goccy's checkLineBreak on the next sibling sees a negative
+// gap and doesn't add its own blank on top of ours. Without this, the
+// wrapper's trailing content plus goccy's checkLineBreak double up and we
+// emit one blank too many.
+func wrapKeepChompLiteral(lit *ast.LiteralNode) *keepChompLiteral {
+	if lit.Value != nil && lit.Value.Token != nil && lit.Value.Token.Position != nil {
+		lit.Value.Token.Position.Line = math.MaxInt32
+	}
+	return &keepChompLiteral{LiteralNode: lit}
+}
+
+// keepChompString wraps an ast.StringNode we created via ValueToNode when
+// its value carries embedded newlines. Goccy's StringNode.String() renders
+// multi-line values by prepending `space+indent` to every content line
+// including empty ones (producing "    \n" instead of "\n") and applies its
+// own TrimSuffix that discards `+` chomp trailing blanks. Ours renders from
+// the parsed value directly so both are preserved.
+type keepChompString struct {
+	*ast.StringNode
+	keyCol int
+}
+
+func (n *keepChompString) String() string {
+	val := n.StringNode.Value
+	header := token.LiteralBlockHeader(val)
+	indent := strings.Repeat(" ", n.keyCol-1+detectedStyle.indent)
+	trimmed := strings.TrimRight(val, "\n")
+	trailNL := len(val) - len(trimmed)
+
+	var sb strings.Builder
+	sb.WriteString(header)
+	for line := range strings.SplitSeq(trimmed, "\n") {
+		sb.WriteByte('\n')
+		if line != "" {
+			sb.WriteString(indent)
+			sb.WriteString(line)
+		}
+	}
+	// `+` chomp keeps every trailing newline. The enclosing MappingNode join
+	// adds one back, so we emit trailNL-1 extras.
+	if strings.HasSuffix(header, "+") {
+		for range trailNL - 1 {
+			sb.WriteByte('\n')
+		}
+	}
+	return sb.String()
 }
 
 // ensureMappingBody swaps a nil or null doc body for a fresh empty block
@@ -522,8 +672,34 @@ func applyValue(file *ast.File, mv *ast.MappingValueNode, val any, childPath str
 		return updateAtNode(file, sourceVal, childPath, subMap)
 	}
 	keyTok := mv.Key.GetToken()
-	if err := replaceAt(file, childPath, val, keyTok.Position.Column, keyTok.Position.IndentLevel); err != nil {
+	keyCol := keyTok.Position.Column
+	// Snapshot the old value's LAST source-chain token before replaceAt
+	// swaps mv.Value. yaml.Path.ReplaceWithNode doesn't rewire the token
+	// chain, so the next sibling's Key.Prev keeps pointing at this token;
+	// if we later wrap the new value with `+` trailing blanks, we bump this
+	// token's line to MaxInt to suppress the checkLineBreak blank that
+	// would otherwise stack on our wrapper's output.
+	oldValTok := lastChainToken(mv.Value)
+	if err := replaceAt(file, childPath, val, keyCol, keyTok.Position.IndentLevel); err != nil {
 		return fmt.Errorf("replacing %s: %w", childPath, err)
+	}
+	// NOTE: monkey-patch for goccy render bugs. When a goccy release ships
+	// StringNode.String()'s multi-line fixes (indent-on-empty and the
+	// TrimSuffix that eats `+`-chomp trailing blanks), comment out this
+	// whole `if` block to disable it.
+	//
+	// Data-created multi-line values land as ast.StringNode (via ValueToNode),
+	// whose String() has its own render bugs. Wrap ours so re-render matches
+	// the parsed value; source-parsed StringNodes stay untouched.
+	if s, ok := mv.Value.(*ast.StringNode); ok && strings.Contains(s.Value, "\n") {
+		mv.Value = &keepChompString{StringNode: s, keyCol: keyCol}
+		// Only when our wrapper appends its own trailing blanks (`+` chomp
+		// with 2+ trailing newlines) do we need to suppress goccy's own
+		// checkLineBreak blank; for clip/strip goccy's natural blank between
+		// records is the one we still want to keep.
+		if trailingNewlineCount(s.Value) >= 2 && oldValTok != nil && oldValTok.Position != nil {
+			oldValTok.Position.Line = math.MaxInt32
+		}
 	}
 	return nil
 }
@@ -542,13 +718,17 @@ func removeMarkedEntries(mn *ast.MappingNode, toRemove map[*ast.MappingValueNode
 		return
 	}
 	filtered := mn.Values[:0]
-	for _, mv := range mn.Values {
+	for i, mv := range mn.Values {
 		if toRemove[mv] {
 			// Goccy attaches the head comment (and its leading blank line)
 			// to the removed node, so dropping the node erases the blank
 			// too. Promote the blank line to a trailing marker on the
 			// previous surviving sibling so it survives as a section break.
-			if hasLeadingBlankLine(mv) && len(filtered) > 0 {
+			// Skip the promotion when goccy will re-insert a blank on its
+			// own (via checkLineBreak on the next surviving entry's first
+			// token), otherwise we'd get two blanks stacked.
+			if hasLeadingBlankLine(mv) && len(filtered) > 0 &&
+				!nextSurvivorHasNaturalBlank(mn.Values, i+1, toRemove) {
 				ensureBlankFoot(filtered[len(filtered)-1])
 			}
 			continue
@@ -556,6 +736,49 @@ func removeMarkedEntries(mn *ast.MappingNode, toRemove map[*ast.MappingValueNode
 		filtered = append(filtered, mv)
 	}
 	mn.Values = filtered
+}
+
+// nextSurvivorHasNaturalBlank finds the next entry that will survive the
+// removal pass and reports whether goccy will naturally emit a blank line
+// above it - via the same checkLineBreak math it uses at render time.
+// Returning true means we should skip promoting a FootComment on the
+// preceding entry; goccy already covers the section break.
+func nextSurvivorHasNaturalBlank(values []*ast.MappingValueNode, from int, toRemove map[*ast.MappingValueNode]bool) bool {
+	for j := from; j < len(values); j++ {
+		if toRemove[values[j]] {
+			continue
+		}
+		return goccyWouldInsertBlank(firstEntryToken(values[j]))
+	}
+	return false
+}
+
+// firstEntryToken returns the token goccy uses when deciding whether to
+// insert a blank line above this entry - the head comment start if there
+// is one, else the key token.
+func firstEntryToken(mv *ast.MappingValueNode) *token.Token {
+	if cg := mv.GetComment(); cg != nil && len(cg.Comments) > 0 {
+		return cg.Comments[0].Token
+	}
+	return mv.Key.GetToken()
+}
+
+// goccyWouldInsertBlank mirrors goccy's checkLineBreak for a single token:
+// raw source-line diff minus any newlines carried in the previous token's
+// origin. When the result is positive, goccy prepends a "\n" during render.
+func goccyWouldInsertBlank(t *token.Token) bool {
+	if t == nil || t.Prev == nil {
+		return false
+	}
+	lineDiff := t.Position.Line - t.Prev.Position.Line - 1
+	if lineDiff <= 0 {
+		return false
+	}
+	adjustment := 0
+	if t.Prev.Type == token.StringType {
+		adjustment = strings.Count(strings.TrimRight(strings.TrimSpace(t.Prev.Origin), "\n"), "\n")
+	}
+	return lineDiff-adjustment > 0
 }
 
 // hasLeadingBlankLine reports whether the source had a blank line immediately

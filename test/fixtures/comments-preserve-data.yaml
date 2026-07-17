@@ -1,0 +1,15 @@
+---
+root:
+  branch1:
+    leaf1: notnull
+    leaf2: 451
+    leaf3: '451'
+    leaf4: word
+    leaf5: |
+      line
+  branch2:
+    leaf2: 42
+    leaf3: '42'
+    leaf4: word2
+    leaf5: |
+      line2

@@ -273,7 +273,7 @@ func (n *keepChompString) String() string {
 	var lines []string
 	if n.useFolded {
 		header = foldedHeader(trailNL)
-		lines = foldWrap(trimmed, maxLineWidth-len(indent))
+		lines = foldWrap(trimmed, detectedStyle.maxLineWidth-len(indent))
 	} else {
 		header = literalHeader(trailNL)
 		lines = strings.Split(trimmed, "\n")
@@ -281,6 +281,13 @@ func (n *keepChompString) String() string {
 
 	var sb strings.Builder
 	sb.WriteString(header)
+	// Inline comment on the header line, mirroring what
+	// ast.LiteralNode.String() does. Without this, an inline comment
+	// preserved through the replace path is dropped at render.
+	if c := n.GetComment(); c != nil {
+		sb.WriteString(strings.Repeat(" ", detectedStyle.spacesBeforeInlineComment))
+		sb.WriteString(c.String())
+	}
 	for _, line := range lines {
 		sb.WriteByte('\n')
 		if line != "" {
@@ -310,7 +317,7 @@ func shouldFold(val, keyName string, keyCol int) bool {
 	if !strings.ContainsAny(trimmed, " \t") {
 		return false
 	}
-	return plainRecordLen(val, keyName, keyCol) > maxLineWidth
+	return plainRecordLen(val, keyName, keyCol) > detectedStyle.maxLineWidth
 }
 
 // literalHeader / foldedHeader translate a trailing-newline count into the
@@ -341,7 +348,7 @@ func foldedHeader(trailNL int) string {
 // values. Wrap when either:
 //   - value carries embedded newlines (plain can't represent them), or
 //   - value is a single line long enough that its plain-form record exceeds
-//     maxLineWidth AND has whitespace to fold on AND has no leading or
+//     detectedStyle.maxLineWidth AND has whitespace to fold on AND has no leading or
 //     trailing whitespace (block scalars strip both).
 //
 // Anything else stays plain, letting goccy render as it always did.
@@ -366,12 +373,12 @@ func shouldWrapStringValue(val string, keyCol int, keyName string) bool {
 	if !strings.ContainsAny(val, " \t") {
 		return false
 	}
-	return plainRecordLen(val, keyName, keyCol) > maxLineWidth
+	return plainRecordLen(val, keyName, keyCol) > detectedStyle.maxLineWidth
 }
 
 // plainRecordLen estimates the record's `<indent><key>: <value>` column
 // count if val were emitted plain (quoted if content demands it). It only
-// has to be exact around the maxLineWidth boundary; a 2-char miss at the
+// has to be exact around the detectedStyle.maxLineWidth boundary; a 2-char miss at the
 // quoting decision changes plain-vs-block only at that exact 120/122 edge.
 func plainRecordLen(val, key string, keyCol int) int {
 	valLen := len(val)
@@ -383,7 +390,7 @@ func plainRecordLen(val, key string, keyCol int) int {
 
 // needsQuoting mirrors goccy's plain-scalar restrictions closely enough for
 // width estimation. Not a substitute for goccy's real quoting decision -
-// only used to size the record for the maxLineWidth comparison.
+// only used to size the record for the detectedStyle.maxLineWidth comparison.
 func needsQuoting(s string) bool {
 	if s == "" {
 		return true
@@ -462,10 +469,6 @@ func splitFoldAtoms(s string) []string {
 	return atoms
 }
 
-// maxLineWidth is the visible-column budget a record must fit for its value
-// to stay in plain form. Over the budget, block scalars kick in.
-const maxLineWidth = 120
-
 // ensureMappingBody swaps a nil or null doc body for a fresh empty block
 // mapping so subsequent updates have somewhere to land.
 func ensureMappingBody(doc *ast.DocumentNode) {
@@ -497,14 +500,22 @@ func newEmptyBlockMapping() *ast.MappingNode {
 }
 
 type style struct {
-	indent      int  // spaces per indent level (block mappings)
-	singleQuote bool // prefer single quotes for values that need quoting
+	indent                    int  // spaces per indent level (block mappings)
+	singleQuote               bool // prefer single quotes for values that need quoting
+	maxLineWidth              int  // column budget: over this, plain scalars fold into `>` block form
+	spacesBeforeInlineComment int  // gap between a scalar value and its inline `#` comment
 }
 
 // detectedStyle is set once at the top of applyMergedDocs and read by the
 // marshalling helpers below. Package-level because run isn't reentrant; same
-// pattern as the env var reads.
-var detectedStyle = style{indent: 2}
+// pattern as the env var reads. Defaults align with goccy's own conventions:
+// 2-space indent, 1 space before an inline comment, 120-column plain-scalar
+// budget.
+var detectedStyle = style{
+	indent:                    2,
+	maxLineWidth:              120,
+	spacesBeforeInlineComment: 1,
+}
 
 // detectStyle uses first-occurrence wins: first parent->child mapping pair
 // determines indent step, first explicitly-quoted string determines quote
@@ -513,7 +524,10 @@ var detectedStyle = style{indent: 2}
 // UPDATE_YAML_PREFER_SINGLE_QUOTE skips quote detection. Only affects values
 // goccy already decided need quoting; plain strings stay plain.
 func detectStyle(file *ast.File) style {
-	s := style{indent: 2}
+	// Start from the package-level defaults and override only what we
+	// detect from the source, so all initial values live in exactly one
+	// place (the `detectedStyle` initializer).
+	s := detectedStyle
 	for _, doc := range file.Docs {
 		if n := findIndentInNode(doc.Body); n > 0 {
 			s.indent = n
@@ -874,7 +888,7 @@ func applyValue(file *ast.File, mv *ast.MappingValueNode, val any, childPath str
 	// and the TrimSuffix that eats `+`-chomp trailing blanks), the multi-line
 	// side of this block becomes unnecessary. The long-single-line side
 	// implements the tool's own presentation rule (fold to `>` when a plain
-	// value would exceed maxLineWidth) - keep it either way.
+	// value would exceed detectedStyle.maxLineWidth) - keep it either way.
 	//
 	// Data-updated values land as ast.StringNode (via ValueToNode). We wrap
 	// ours to (a) fix goccy's multi-line render bugs and (b) apply the

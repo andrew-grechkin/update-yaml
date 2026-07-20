@@ -6,6 +6,19 @@ export tool := 'update-yaml'
 @build: fix
     go build -o "$XDG_CACHE_HOME/go/bin/"
 
+# Show godoc for the package including debug-tagged symbols
+doc:
+    #!/usr/bin/env -S bash -Eeuo pipefail
+    # `go doc` has no -tags flag and skips files behind `//go:build debug`, so swap the tag
+    # out under a trap-restored guard and restore it on exit regardless
+    tagged=$(grep -l '^//go:build debug$' *.go || true)
+    trap 'for f in $tagged; do sed -i "s|^//go:build-doc-strip$|//go:build debug|" "$f"; done' EXIT
+
+    for f in $tagged; do
+        sed -i 's|^//go:build debug$|//go:build-doc-strip|' "$f"
+    done
+    go doc -all -u .
+
 # Install the binary globally
 @install:
     go install "$tool"

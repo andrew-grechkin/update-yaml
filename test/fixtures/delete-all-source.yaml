@@ -1,0 +1,8 @@
+---
+# top-level comment
+alpha: one
+beta: two
+gamma:
+  nested_a: 1
+  nested_b: 2
+delta: four

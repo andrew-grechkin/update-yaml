@@ -11,13 +11,16 @@ package main
 // value should look after an update.
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/goccy/go-yaml/ast"
+	"github.com/goccy/go-yaml/parser"
+	"github.com/goccy/go-yaml/token"
 )
 
-// keepChompString wraps an ast.StringNode we created via ValueToNode and
-// re-renders it from a caller-supplied raw Go string. Two motivations:
+// Wraps an ast.StringNode we created via ValueToNode and re-renders it
+// from a caller-supplied raw Go string. Two motivations:
 //
 //   - Style: for a long single-line value we emit `>` block form with
 //     word-wrapping (useFolded == true).
@@ -80,8 +83,8 @@ func (n *keepChompString) String() string {
 	return sb.String()
 }
 
-// shouldWrapStringValue applies the block-form rule for updated string
-// values. Wrap when either:
+// Applies the block-form rule for updated string values. Wrap when
+// either:
 //   - value carries embedded newlines (plain can't represent them), or
 //   - value is a single line long enough that its plain-form record exceeds
 //     detectedStyle.maxLineWidth AND has whitespace to fold on AND has no
@@ -91,8 +94,8 @@ func (n *keepChompString) String() string {
 //
 // NOTE: two motivations mixed here. The `strings.Contains(val, "\n")`
 // early-return is a monkey-patch for goccy's StringNode multi-line render
-// bugs; when a goccy release ships those fixes, delete that early-return so
-// only the style-selection rule (the long-single-line path) remains active.
+// bugs; delete it (per the removal checklist in patch_goccy.go) to leave
+// only the style-selection rule (the long-single-line path) active.
 func shouldWrapStringValue(val string, keyCol int, keyName string) bool {
 	if strings.Contains(val, "\n") {
 		return true
@@ -112,7 +115,7 @@ func shouldWrapStringValue(val string, keyCol int, keyName string) bool {
 	return plainRecordLen(val, keyName, keyCol) > detectedStyle.maxLineWidth
 }
 
-// shouldFold picks `>` (folded) over `|` (literal). `>` only pays off when
+// Picks `>` (folded) over `|` (literal). `>` only pays off when
 // the content is one paragraph (no mid-newlines) that has whitespace to
 // break at AND whose plain rendering wouldn't fit on one line. Everything
 // else - multi-line values, single-word values, short values - stays `|`.
@@ -127,8 +130,8 @@ func shouldFold(val, keyName string, keyCol int) bool {
 	return plainRecordLen(val, keyName, keyCol) > detectedStyle.maxLineWidth
 }
 
-// literalHeader / foldedHeader translate a trailing-newline count into the
-// right chomp indicator for `|`-family and `>`-family block scalars.
+// Translates a trailing-newline count into the right chomp indicator for
+// `|`-family and `>`-family block scalars.
 func literalHeader(trailNL int) string {
 	switch trailNL {
 	case 0:
@@ -151,11 +154,11 @@ func foldedHeader(trailNL int) string {
 	}
 }
 
-// plainRecordLen estimates the record's `<indent><key>: <value>` column
-// count if val were emitted plain (quoted if content demands it). It only
-// has to be exact around the detectedStyle.maxLineWidth boundary; a 2-char
-// miss at the quoting decision changes plain-vs-block only at that exact
-// 120/122 edge.
+// Estimates the record's `<indent><key>: <value>` column count if val
+// were emitted plain (quoted if content demands it). It only has to be
+// exact around the detectedStyle.maxLineWidth boundary; a 2-char miss at
+// the quoting decision changes plain-vs-block only at that exact 120/122
+// edge.
 func plainRecordLen(val, key string, keyCol int) int {
 	valLen := len(val)
 	if needsQuoting(val) {
@@ -164,9 +167,95 @@ func plainRecordLen(val, key string, keyCol int) int {
 	return (keyCol - 1) + len(key) + len(": ") + valLen
 }
 
-// needsQuoting mirrors goccy's plain-scalar restrictions closely enough for
-// width estimation. Not a substitute for goccy's real quoting decision -
-// only used to size the record for the maxLineWidth comparison.
+// Walks a data-provided node and demotes any explicitly-quoted StringNode
+// whose value would parse to the same string unquoted. Runs only on
+// data-provided nodes so source-verbatim quotes on unchanged values
+// survive. Visits both keys and values so JSON-style double-quoted keys
+// ("port": 9090) end up as plain YAML keys.
+func unquoteSafeStrings(n ast.Node) {
+	switch v := n.(type) {
+	case *ast.StringNode:
+		if v.Token == nil {
+			return
+		}
+		if v.Token.Type != token.SingleQuoteType && v.Token.Type != token.DoubleQuoteType {
+			return
+		}
+		if !safeToUnquote(v.Value) {
+			return
+		}
+		v.Token.Type = token.StringType
+	case *ast.MappingNode:
+		for _, mv := range v.Values {
+			unquoteSafeStrings(mv)
+		}
+	case *ast.MappingValueNode:
+		unquoteSafeStrings(v.Key)
+		unquoteSafeStrings(v.Value)
+	case *ast.SequenceNode:
+		for _, entry := range v.Values {
+			unquoteSafeStrings(entry)
+		}
+	case *ast.AnchorNode:
+		unquoteSafeStrings(v.Value)
+	}
+}
+
+// Scalar forms that YAML 1.1 (still widely used by Ansible, older Puppet,
+// Ruby libraries) resolves to booleans. Goccy is YAML 1.2 and round-trips
+// them as plain strings, so the parse-based oracle in safeToUnquote
+// wouldn't reject them on its own. Quotes are kept to preserve semantics
+// for downstream 1.1 consumers.
+var yaml11Bools = map[string]bool{
+	"y": true, "Y": true, "yes": true, "Yes": true, "YES": true,
+	"n": true, "N": true, "no": true, "No": true, "NO": true,
+	"on": true, "On": true, "ON": true,
+	"off": true, "Off": true, "OFF": true,
+}
+
+// The YAML 1.1 base-60 integer form, copied verbatim from
+// http://yaml.org/type/int.html. Each colon-separated section after the
+// first must fall in [0,59].
+var sexagesimalPattern = regexp.MustCompile(`^[-+]?[1-9][0-9_]*(:[0-5]?[0-9])+$`)
+
+// Decides whether v, if written as a plain scalar, would parse back to
+// the same string. Uses the parser as its own oracle so we don't have to
+// enumerate every indicator character, reserved token, or resolvable type
+// keyword - anything goccy parses as a non-StringNode (or a StringNode
+// with different content) is unsafe. Additionally rejects YAML 1.1
+// spellings that goccy accepts as plain strings but older parsers would
+// resolve to non-string types: boolean words and sexagesimal digits
+// (`80:80`, `1:30:00`). Real-world files - docker-compose port mappings,
+// Ansible playbooks - lean on the 1.1 conventions.
+//
+// The check runs in block context (top-level parse). A quoted scalar
+// inside a flow-style mapping/sequence has stricter plain-scalar rules
+// (no bare commas, brackets, or braces); if that comes up, this function
+// will need flow-context awareness.
+func safeToUnquote(v string) bool {
+	if v == "" {
+		return false
+	}
+	if yaml11Bools[v] {
+		return false
+	}
+	if sexagesimalPattern.MatchString(v) {
+		return false
+	}
+	file, err := parser.ParseBytes([]byte(v), 0)
+	if err != nil || len(file.Docs) != 1 {
+		return false
+	}
+	sn, ok := file.Docs[0].Body.(*ast.StringNode)
+	if !ok {
+		return false
+	}
+	return sn.Value == v
+}
+
+// Mirrors goccy's plain-scalar restrictions closely enough for width
+// estimation. Not a substitute for goccy's real quoting decision - only
+// used to size the record for the maxLineWidth comparison.
 func needsQuoting(s string) bool {
 	if s == "" {
 		return true
@@ -189,8 +278,8 @@ func needsQuoting(s string) bool {
 	return false
 }
 
-// foldWrap breaks `s` across lines no wider than `width`, splitting only on
-// single spaces. Runs of two or more spaces stay atomic inside a segment -
+// Breaks `s` across lines no wider than `width`, splitting only on single
+// spaces. Runs of two or more spaces stay atomic inside a segment -
 // splitting a multi-space run would leave a wrapped line starting with
 // whitespace, which folded-scalar semantics treat as "more indented" and
 // preserve as a literal newline instead of folding to a space.

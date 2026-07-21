@@ -1,0 +1,23 @@
+---
+compose:
+  # docker-compose style port mappings - YAML 1.1 sexagesimal territory
+  port_short: 'PLACEHOLDER'
+  port_long: 'PLACEHOLDER'
+  duration: 'PLACEHOLDER'
+  # YAML 1.1 boolean spellings that older parsers resolve as bool
+  bool_yes: 'PLACEHOLDER'
+  bool_On: 'PLACEHOLDER'
+  bool_off: 'PLACEHOLDER'
+  bool_YES: 'PLACEHOLDER'
+  # YAML 1.2 reserved values
+  reserved_true: 'PLACEHOLDER'
+  reserved_null: 'PLACEHOLDER'
+  reserved_tilde: 'PLACEHOLDER'
+  reserved_inf: 'PLACEHOLDER'
+  # numeric-looking strings the author wants as strings
+  num_int: 'PLACEHOLDER'
+  num_float: 'PLACEHOLDER'
+  num_hex: 'PLACEHOLDER'
+  # plain-safe values that SHOULD unquote
+  plain_word: 'PLACEHOLDER'
+  plain_id: 'PLACEHOLDER'

@@ -1,0 +1,10 @@
+---
+service:
+  # kept from source
+  name: api
+  port: 9090 # inline comment kept
+  replicas: 3
+  metadata:
+    region: eu
+    version: "2.0"
+  endpoint: https://api.example.com

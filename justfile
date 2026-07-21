@@ -71,11 +71,15 @@ test-int: build
         data=()
         if [[ -f "test/fixtures/${name}-data.yaml" ]]; then
             data=("test/fixtures/${name}-data.yaml")
+        elif [[ -f "test/fixtures/${name}-data.json" ]]; then
+            data=("test/fixtures/${name}-data.json")
         else
             base="test/fixtures/${name}-base.yaml"
             over="test/fixtures/${name}-override.yaml"
             if [[ -f "$base" && -f "$over" ]]; then
                 data=("$base" "$over")
+            elif compgen -G "test/fixtures/${name}-layer-*.yaml" > /dev/null; then
+                mapfile -t data < <(printf '%s\n' test/fixtures/${name}-layer-*.yaml | sort)
             fi
         fi
 

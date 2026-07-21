@@ -7,19 +7,19 @@ Reads source YAML from STDIN, outputs updated result to STDOUT.
 
 Data files are merged in order (later files override earlier ones).
 
-Comments and key order from STDIN are preserved.
+Comments and key order from STDIN are preserved. Data-provided inline
+comments override source's on leaf updates; source keeps its comment when
+data has none.
 Keys that exist in the STDIN document are updated in place.
-Keys present only in the data files are injected into output.
+Keys present only in the data files are inserted at their alphabetical
+position when the surrounding siblings are already sorted, otherwise
+appended at the end in data-tree order.
 Setting a key to an explicit null in the merged data removes it from the output.
 
 Options:
   -h, --help        Display help message
   -m, --man         Display full readme         (tip: update-yaml --man | colored-md)
   -v, --version     Display version information (tip: update-yaml --version | jq -r .Version)
-
-Environment:
-  UPDATE_YAML_PREFER_ORDER_PRESERVED  new keys are appended in the order data declares them
-  UPDATE_YAML_PREFER_SINGLE_QUOTE     values that need quoting are emitted with single quotes
 
 Examples:
   update-yaml < source.yaml base.yaml override.yaml

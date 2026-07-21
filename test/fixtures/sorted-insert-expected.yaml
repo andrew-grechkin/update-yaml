@@ -1,0 +1,16 @@
+---
+# alphabetically sorted mapping - author intent to keep keys ordered
+sorted_section:
+  alpha: 1
+  bravo: 2
+  charlie: 3
+  delta: 4
+  echo_key: 5
+  foxtrot: 6
+# author-ordered mapping - order carries meaning
+unsorted_section:
+  zebra: 26
+  apple: 1
+  mango: 13
+  cherry: 3
+  banana: 2

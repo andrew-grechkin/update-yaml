@@ -1,0 +1,14 @@
+---
+# scalar becomes a map
+database:
+  driver: postgres
+  host: db.example.com
+  port: 5432
+# map becomes a scalar
+cache: none
+# scalar becomes a sequence
+tags:
+  - alpha
+  - beta
+# sequence becomes a scalar
+hosts: single.example.com

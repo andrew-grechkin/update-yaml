@@ -1,0 +1,10 @@
+---
+database:
+  driver: postgres
+  host: db.example.com
+  port: 5432
+cache: none
+tags:
+  - alpha
+  - beta
+hosts: single.example.com

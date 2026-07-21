@@ -1,0 +1,9 @@
+---
+service:
+  # kept from source
+  name: api
+  port: 8080  # inline comment kept
+  replicas: 1
+  metadata:
+    version: 1.0
+    stale: yes  # will be deleted

@@ -15,7 +15,7 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
-// DumpJson returns a pretty-printed JSON encoding of data.
+// Returns a pretty-printed JSON encoding of data.
 //
 // Marshal errors yield an empty string.
 func DumpJson(data any) string {
@@ -23,8 +23,8 @@ func DumpJson(data any) string {
 	return string(jsonBytes)
 }
 
-// DumpYaml returns a YAML encoding of data using single-quoted scalars
-// and a 2-space indent.
+// Returns a YAML encoding of data using single-quoted scalars and a
+// 2-space indent.
 //
 // Marshal errors yield an empty string.
 func DumpYaml(data any) string {
@@ -37,7 +37,7 @@ func DumpYaml(data any) string {
 	return string(yamlBytes)
 }
 
-// Inspect returns a JSON/YAML-serializable representation of data.
+// Returns a JSON/YAML-serializable representation of data.
 //
 // A top-level struct is labeled as {TypeName: fields}; nested structs
 // contribute their fields inline.
@@ -51,9 +51,9 @@ func Inspect(data any) any {
 	return inspectValue(v)
 }
 
-// unwrap returns the value pointed to by v, dereferencing chained pointers.
+// Returns the value pointed to by v, dereferencing chained pointers.
 //
-// If v is or resolves to a nil pointer, it returns the zero reflect.Value.
+// If v is or resolves to a nil pointer, returns the zero reflect.Value.
 func unwrap(v reflect.Value) reflect.Value {
 	for v.Kind() == reflect.Pointer {
 		if v.IsNil() {
@@ -64,7 +64,7 @@ func unwrap(v reflect.Value) reflect.Value {
 	return v
 }
 
-// inspectValue returns a JSON/YAML-serializable representation of v.
+// Returns a JSON/YAML-serializable representation of v.
 //
 // Structs contribute their fields inline without a type-name wrapper.
 func inspectValue(v reflect.Value) any {
@@ -99,8 +99,8 @@ func inspectValue(v reflect.Value) any {
 	}
 }
 
-// inspectFields returns a map of the exported fields of the struct v,
-// keyed by field name.
+// Returns a map of the exported fields of the struct v, keyed by field
+// name.
 //
 // The tokenizer's Next and Prev linked-list pointers are excluded to keep
 // dumps scoped to the target node.

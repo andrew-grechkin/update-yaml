@@ -1,0 +1,14 @@
+---
+service:
+  hosts:
+  - new-a
+  - new-b
+  ports:
+    - 8080
+    - 8443
+  regions:
+  - eu
+  - us
+  tags:
+    - stable
+    - canary

@@ -108,73 +108,69 @@ func TestRunNoArgsIsPassthrough(t *testing.T) {
 	assertContains(t, got, "host: localhost")
 }
 
-// New keys go in alphabetically by default; UPDATE_YAML_PREFER_ORDER_PRESERVED
-// reverts to data-order append.
-func TestRunPreferOrderPreserved(t *testing.T) {
-	source := []byte("existing: value\n")
+// When source siblings are NOT already sorted the tool preserves the data
+// author's order for appended keys. Sorted-insertion only kicks in when
+// existing keys are ordered; unsorted mappings keep data-tree order.
+func TestRunAppendsInDataOrder(t *testing.T) {
+	// Source has two keys in author order (m before a) so
+	// siblingsAreSorted returns false and new keys append at the end
+	// in data-tree order rather than getting sort-inserted.
+	source := []byte("m_seed: 1\na_seed: 2\n")
 	data := []byte("zeta: 1\nbeta: 2\nalpha: 3\n")
 	dataPath := filepath.Join(t.TempDir(), "data.yaml")
 	if err := os.WriteFile(dataPath, data, 0o644); err != nil {
 		t.Fatalf("write data: %v", err)
 	}
 
-	t.Run("default sorted", func(t *testing.T) {
-		t.Setenv("UPDATE_YAML_PREFER_ORDER_PRESERVED", "")
-		var stdout bytes.Buffer
-		if err := run([]string{"update-yaml", dataPath}, bytes.NewReader(source), &stdout); err != nil {
-			t.Fatalf("run: %v", err)
-		}
-		want := "alpha: 3\nbeta: 2\nexisting: value\nzeta: 1\n"
-		if got := stdout.String(); got != want {
-			t.Errorf("default sorted insertion: want %q, got %q", want, got)
-		}
-	})
-
-	t.Run("env var preserves data order", func(t *testing.T) {
-		t.Setenv("UPDATE_YAML_PREFER_ORDER_PRESERVED", "1")
-		var stdout bytes.Buffer
-		if err := run([]string{"update-yaml", dataPath}, bytes.NewReader(source), &stdout); err != nil {
-			t.Fatalf("run: %v", err)
-		}
-		want := "existing: value\nzeta: 1\nbeta: 2\nalpha: 3\n"
-		if got := stdout.String(); got != want {
-			t.Errorf("env-var data-order: want %q, got %q", want, got)
-		}
-	})
+	var stdout bytes.Buffer
+	if err := run([]string{"update-yaml", dataPath}, bytes.NewReader(source), &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	want := "m_seed: 1\na_seed: 2\nzeta: 1\nbeta: 2\nalpha: 3\n"
+	if got := stdout.String(); got != want {
+		t.Errorf("want %q, got %q", want, got)
+	}
 }
 
-// UPDATE_YAML_PREFER_SINGLE_QUOTE prefers single quotes for values that need
-// quoting, regardless of what the source file uses.
-func TestRunPreferSingleQuote(t *testing.T) {
+// When source siblings are already sorted, appended keys land at their
+// alphabetical position instead of the end - preserving the author's
+// ordering convention.
+func TestRunSortsAppendedKeysWhenSourceIsSorted(t *testing.T) {
+	source := []byte("alpha: 1\ncharlie: 3\n")
+	data := []byte("delta: 4\nbravo: 2\n")
+	dataPath := filepath.Join(t.TempDir(), "data.yaml")
+	if err := os.WriteFile(dataPath, data, 0o644); err != nil {
+		t.Fatalf("write data: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	if err := run([]string{"update-yaml", dataPath}, bytes.NewReader(source), &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	want := "alpha: 1\nbravo: 2\ncharlie: 3\ndelta: 4\n"
+	if got := stdout.String(); got != want {
+		t.Errorf("want %q, got %q", want, got)
+	}
+}
+
+// Updated values keep the quote style the data file used - the tool honors
+// data's style verbatim. Appended keys likewise take their style from data.
+// Source's own quote style is preserved on untouched values.
+func TestRunAppendedKeysHonorDataStyle(t *testing.T) {
 	source := []byte(`host: "old"` + "\n")
 	dataPath := filepath.Join(t.TempDir(), "data.yaml")
 	if err := os.WriteFile(dataPath, []byte("version: '42'\n"), 0o644); err != nil {
 		t.Fatalf("write data: %v", err)
 	}
 
-	t.Run("default follows source", func(t *testing.T) {
-		t.Setenv("UPDATE_YAML_PREFER_SINGLE_QUOTE", "")
-		var stdout bytes.Buffer
-		if err := run([]string{"update-yaml", dataPath}, bytes.NewReader(source), &stdout); err != nil {
-			t.Fatalf("run: %v", err)
-		}
-		want := "host: \"old\"\nversion: \"42\"\n"
-		if got := stdout.String(); got != want {
-			t.Errorf("default: want %q, got %q", want, got)
-		}
-	})
-
-	t.Run("env var prefers single", func(t *testing.T) {
-		t.Setenv("UPDATE_YAML_PREFER_SINGLE_QUOTE", "1")
-		var stdout bytes.Buffer
-		if err := run([]string{"update-yaml", dataPath}, bytes.NewReader(source), &stdout); err != nil {
-			t.Fatalf("run: %v", err)
-		}
-		want := "host: \"old\"\nversion: '42'\n"
-		if got := stdout.String(); got != want {
-			t.Errorf("env var: want %q, got %q", want, got)
-		}
-	})
+	var stdout bytes.Buffer
+	if err := run([]string{"update-yaml", dataPath}, bytes.NewReader(source), &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	want := "host: \"old\"\nversion: '42'\n"
+	if got := stdout.String(); got != want {
+		t.Errorf("want %q, got %q", want, got)
+	}
 }
 
 func TestRunHelp(t *testing.T) {

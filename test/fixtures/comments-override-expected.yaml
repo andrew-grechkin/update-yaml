@@ -1,0 +1,16 @@
+---
+root:
+  branch1: # some comment for a branch1
+    leaf1: notnull # updated comment
+    leaf2: 451 # updated comment
+    leaf3: '451' # updated comment
+    leaf4: word # updated comment
+    leaf5: | # updated comment
+      line
+  branch2: # some comment for a branch2
+    leaf1: null # this leaf has comment
+    leaf2: 42 # new comment
+    leaf3: '42' # new comment
+    leaf4: word2 # new comment
+    leaf5: | # new comment
+      line2

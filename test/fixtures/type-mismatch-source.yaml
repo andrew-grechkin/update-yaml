@@ -1,0 +1,13 @@
+---
+# scalar becomes a map
+database: sqlite:///tmp/dev.db
+# map becomes a scalar
+cache:
+  driver: memory
+  ttl: 60
+# scalar becomes a sequence
+tags: initial
+# sequence becomes a scalar
+hosts:
+  - a.example.com
+  - b.example.com

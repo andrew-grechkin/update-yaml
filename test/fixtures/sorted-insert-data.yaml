@@ -1,0 +1,9 @@
+---
+# new keys given in non-alphabetical order - each destination decides where they land
+sorted_section:
+  echo_key: 5
+  bravo: 2
+  delta: 4
+unsorted_section:
+  cherry: 3
+  banana: 2

@@ -1,0 +1,14 @@
+---
+# defaults from source template
+app:
+  name: app
+  env: development
+  logging:
+    level: warn
+    format: text
+  features:
+    experimental: false
+    beta: false
+  timeouts:
+    connect: 5
+    read: 30

@@ -1,0 +1,12 @@
+{
+  "service": {
+    "port": 9090,
+    "replicas": 3,
+    "metadata": {
+      "version": "2.0",
+      "stale": null,
+      "region": "eu"
+    },
+    "endpoint": "https://api.example.com"
+  }
+}

@@ -1,0 +1,14 @@
+---
+# anchor with shared defaults
+defaults: &def
+  timeout: 30
+  retries: 3
+prod:
+  <<: *def
+  extra: added
+  host: prod-v2.example.com
+  port: 8080
+staging:
+  <<: *def
+  host: stg.example.com
+  port: 8081

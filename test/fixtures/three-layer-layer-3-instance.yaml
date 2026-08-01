@@ -1,0 +1,7 @@
+---
+# instance-specific pin
+app:
+  env: production
+  features:
+    experimental: true
+  region: eu-west-1

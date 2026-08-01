@@ -60,6 +60,7 @@ probe: fix
 test-int: build
     #!/usr/bin/env -S bash -Eeuo pipefail
 
+    unset UPDATE_YAML_MAX_LINE_WIDTH
     bin="${GOBIN:-${GOPATH:-$HOME/go}/bin}/$tool"
     failures=0
 
@@ -71,16 +72,25 @@ test-int: build
         data=()
         if [[ -f "test/fixtures/${name}-data.yaml" ]]; then
             data=("test/fixtures/${name}-data.yaml")
+        elif [[ -f "test/fixtures/${name}-data.json" ]]; then
+            data=("test/fixtures/${name}-data.json")
         else
             base="test/fixtures/${name}-base.yaml"
             over="test/fixtures/${name}-override.yaml"
             if [[ -f "$base" && -f "$over" ]]; then
                 data=("$base" "$over")
+            elif compgen -G "test/fixtures/${name}-layer-*.yaml" > /dev/null; then
+                mapfile -t data < <(printf '%s\n' test/fixtures/${name}-layer-*.yaml | sort)
             fi
         fi
 
+        env_prefix=()
+        if [[ "$name" == fold* ]]; then
+            env_prefix=(env UPDATE_YAML_MAX_LINE_WIDTH=120)
+        fi
+
         echo -n "Testing $name... " >&2
-        if result=$("$bin" "${data[@]}" < "$source") && [[ "$result" == "$(cat "$f")" ]]; then
+        if result=$("${env_prefix[@]}" "$bin" "${data[@]}" < "$source") && [[ "$result" == "$(cat "$f")" ]]; then
             echo "✓ PASS" >&2
         else
             echo "✗ FAIL" >&2

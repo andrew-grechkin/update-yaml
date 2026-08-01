@@ -1,5 +1,18 @@
 ---
 hash:
+  additional_not_to_fold_words: aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaaa
+  additional_to_fold_lines1: |-
+    line 1
+    line 2
+  additional_to_fold_lines2: |
+    line 1
+    line 2
+  additional_to_fold_lines3: |+
+    line 1
+    line 2
+
+  additional_to_fold_words: >-
+    aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaaa
   # data uses `>-`
   already_folded_k: >-
     This scalar is already emitted as folded style by the author;
@@ -10,12 +23,12 @@ hash:
     boundaries may not be optimal.
 
   # exactly at the line width. Must stay plain (no overflow)
-  at_line_width_k: aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aa
-  at_line_width_u: aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aa
+  at_line_width1_k: aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa a
+  at_line_width1_u: aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa a
 
   # at one character more than line width. Must be re-formatted
-  at_line_width1_k: aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aa
-  at_line_width1_u: >-
+  at_line_width2_k: aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aa
+  at_line_width2_u: >-
     aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aa
 
   # basic long single-line
@@ -60,6 +73,17 @@ hash:
   leading_whitespace_k: '   three leading spaces then the description continues on and on past the line width to force the fold logic to check the guard rail.'
   leading_whitespace_u: '   three leading spaces then the description continues on and on past the line width to force the fold logic to check the guard rail.'
 
+  # multiline string with multiple trailing new lines
+  multi_line_many_trailing_k: |+
+    This line1 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
+    This line2 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
+
+
+  multi_line_many_trailing_u: |+
+    This line1 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
+    This line2 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
+
+
   # multiline string without trailing new line
   multi_line_no_trailing_k: |-
     This line1 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
@@ -75,17 +99,6 @@ hash:
   multi_line_one_trailing_u: |
     This line1 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
     This line2 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
-
-  # multiline string with multiple trailing new lines
-  multi_line_many_trailing_k: |+
-    This line1 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
-    This line2 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
-
-
-  multi_line_many_trailing_u: |+
-    This line1 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
-    This line2 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
-
 
   # adjacent multi-space near a natural wrap boundary
   multi_space_at_wrap1_k: >-

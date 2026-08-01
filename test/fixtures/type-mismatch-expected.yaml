@@ -1,0 +1,23 @@
+---
+# scalar becomes a map
+database:
+  driver: postgres
+  host: db.example.com
+  port: 5432
+# map becomes a scalar
+cache: none
+# scalar becomes a sequence
+tags:
+  - alpha
+  - beta
+# sequence becomes a scalar
+hosts: single.example.com
+# source-level null that data never touches - must survive
+feature_flag: null
+# source nested null inside a map where data updates a sibling -
+# recursion preserves nulls it doesn't touch
+config:
+  keep_null: null
+  update_me: new
+# source null that data explicitly overwrites - value becomes non-null
+overridden_null: 42

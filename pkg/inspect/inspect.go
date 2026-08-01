@@ -1,11 +1,11 @@
 //go:build debug
 
 // Debug-only AST/token inspection helpers. Not compiled unless the binary is
-// built with `-tags debug`; call sites in main.go that reference these
-// functions must be gated the same way (or left commented out for ad-hoc
-// enabling during a debug session).
+// built with `-tags debug`; call sites that reference these functions must
+// be gated the same way (or left commented out for ad-hoc enabling during
+// a debug session).
 
-package main
+package inspect
 
 import (
 	"encoding/json"

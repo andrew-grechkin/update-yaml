@@ -1,12 +1,17 @@
 ---
 hash:
+  additional_not_to_fold_words: aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaaa
+  additional_to_fold_words: aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaaa
+  additional_to_fold_lines1: "line 1\nline 2"
+  additional_to_fold_lines2: "line 1\nline 2\n"
+  additional_to_fold_lines3: "line 1\nline 2\n\n"
   already_folded_d: null
   already_folded_u: This scalar is already emitted as folded style by the author; the pass leaves it untouched even though
     the wrap boundaries may not be optimal.
-  at_line_width_d: null
-  at_line_width_u: aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aa
   at_line_width1_d: null
-  at_line_width1_u: aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aa
+  at_line_width1_u: aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa a
+  at_line_width2_d: null
+  at_line_width2_u: aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aa
   basic_long_d: null
   basic_long_u: This is a very long single-line description that clearly exceeds the line width and should be broken into
     multiple lines to improve readability of the YAML file.

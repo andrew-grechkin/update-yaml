@@ -1,0 +1,9 @@
+---
+short: PLACEHOLDER
+at120: PLACEHOLDER
+over120: PLACEHOLDER
+long: PLACEHOLDER
+nospaces: PLACEHOLDER
+kept_folded: >-
+  original data-provided fold that must survive verbatim
+  because update-yaml never reformats source content

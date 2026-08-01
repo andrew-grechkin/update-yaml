@@ -1,0 +1,4 @@
+---
+service:
+  name: api
+  port: 8080

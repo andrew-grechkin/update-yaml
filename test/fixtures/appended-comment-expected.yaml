@@ -1,0 +1,10 @@
+---
+service:
+  name: api
+  # optional overrides
+  overrides:
+    timeout: 30 # seconds
+  port: 8080
+  # rolled out 2026-07-01
+  region: eu # primary region
+  replicas: 3 # scale-out target

@@ -1,0 +1,26 @@
+---
+# scalar becomes a map
+database: sqlite:///tmp/dev.db
+# map becomes a scalar
+cache:
+  driver: memory
+  ttl: 60
+# scalar becomes a sequence
+tags: initial
+# sequence becomes a scalar
+hosts:
+  - a.example.com
+  - b.example.com
+# source-level null that data never touches - must survive
+feature_flag: null
+# source nested null inside a map where data updates a sibling -
+# recursion preserves nulls it doesn't touch
+config:
+  keep_null: null
+  update_me: old
+# source null that data explicitly overwrites - value becomes non-null
+overridden_null: null
+# data nulls out a non-leaf key - the whole subtree must be removed
+remove_whole_map:
+  keep_me: 1
+  and_me: 2

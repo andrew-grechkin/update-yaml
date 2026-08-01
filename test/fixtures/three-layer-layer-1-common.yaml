@@ -1,0 +1,8 @@
+---
+# common: environment override
+app:
+  env: staging
+  logging:
+    level: info
+  timeouts:
+    read: 60

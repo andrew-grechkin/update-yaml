@@ -1,0 +1,15 @@
+---
+# defaults from source template
+app:
+  name: app
+  env: production
+  logging:
+    level: info
+    format: json
+  features:
+    experimental: true
+    beta: true
+  timeouts:
+    connect: 10
+    read: 60
+  region: eu-west-1

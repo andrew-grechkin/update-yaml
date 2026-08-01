@@ -1,0 +1,7 @@
+---
+event_time: !!timestamp "2026-07-17T12:00:00Z"
+image_blob: !!binary "R0lG"
+port_str: !!str 9090
+user: !MyType
+  name: alice
+  role: admin

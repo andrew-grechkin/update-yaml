@@ -1,0 +1,10 @@
+{
+  "host": "db.example.com",
+  "port": 5432,
+  "debug": null,
+  "features": {
+    "beta": true,
+    "legacy": null
+  },
+  "regions": ["eu-west-1", "us-east-1"]
+}

@@ -1,0 +1,17 @@
+---
+database:
+  driver: postgres
+  host: db.example.com
+  port: 5432
+  # null child in a data-provided map that REPLACES a source scalar -
+  # must be stripped, not rendered
+  deprecated: null
+cache: none
+tags:
+  - alpha
+  - beta
+hosts: single.example.com
+config:
+  update_me: new
+overridden_null: 42
+remove_whole_map: null

@@ -1,0 +1,19 @@
+---
+# top-level comment
+app:
+  name: my-app # inline comment on quoted value
+  # feature toggles
+  features:
+    beta: true
+    experimental: false
+  hosts:
+    - primary.example.com
+    - secondary.example.com
+  metadata:
+    version: 1.2.3
+    tags: [foo, bar]
+  # trailing block
+  description: >
+    long folded
+    description spanning
+    multiple source lines

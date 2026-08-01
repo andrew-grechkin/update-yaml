@@ -1,7 +1,7 @@
-single_num: '1982'
+single_num: "1982"
 double_num: '99'
 double_str: 'baz'
-single_str: 'bar'
+single_str: "bar"
 looks_like_bool: 'false'
 looks_like_null: '~'
 empty_str: ""

@@ -11,15 +11,15 @@ hash:
     may not be optimal.
   already_folded_u: to update
 
-  at_line_width_d: aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aa
+  at_line_width1_d: aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa a
   # exactly at the line width. Must stay plain (no overflow)
-  at_line_width_k: aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aa
-  at_line_width_u: to update
-
-  at_line_width1_d: aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aa
-  # at one character more than line width. Must be re-formatted
-  at_line_width1_k: aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aa
+  at_line_width1_k: aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa a
   at_line_width1_u: to update
+
+  at_line_width2_d: aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aa
+  # at one character more than line width. Must be re-formatted
+  at_line_width2_k: aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aa
+  at_line_width2_u: to update
 
   basic_long_d: >-
     This is a very long single-line description that clearly exceeds the line width and should be broken into multiple
@@ -69,6 +69,18 @@ hash:
   leading_whitespace_k: '   three leading spaces then the description continues on and on past the line width to force the fold logic to check the guard rail.'
   leading_whitespace_u: to update
 
+  multi_line_many_trailing_d: |+
+    This line1 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
+    This line2 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
+
+  # multiline string with multiple trailing new lines
+  multi_line_many_trailing_k: |+
+    This line1 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
+    This line2 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
+
+
+  multi_line_many_trailing_u: to update
+
   multi_line_no_trailing_d: |-
     This line1 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
     This line2 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
@@ -86,18 +98,6 @@ hash:
     This line1 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
     This line2 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
   multi_line_one_trailing_u: to update
-
-  multi_line_many_trailing_d: |+
-    This line1 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
-    This line2 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
-
-  # multiline string with multiple trailing new lines
-  multi_line_many_trailing_k: |+
-    This line1 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
-    This line2 is a long description that contains a literal	tab character in the middle and continues past the line width to trigger the fold
-
-
-  multi_line_many_trailing_u: to update
 
   multi_space_at_wrap1_d: >-
     aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb

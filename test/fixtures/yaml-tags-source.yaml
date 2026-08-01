@@ -1,0 +1,12 @@
+---
+# standard tags
+event_time: !!timestamp "2020-01-01T00:00:00Z"
+image_blob: !!binary "AAAA"
+# integer as a string
+port_str: !!str 8080
+# custom local tag
+user: !MyType
+  name: bob
+  role: guest
+# untouched key with tag
+untouched: !!str kept

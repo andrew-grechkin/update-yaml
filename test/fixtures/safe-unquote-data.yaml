@@ -1,0 +1,18 @@
+---
+compose:
+  port_short: '80:80'
+  port_long: '80:8080'
+  duration: '1:30:00'
+  bool_yes: 'yes'
+  bool_On: 'On'
+  bool_off: 'off'
+  bool_YES: 'YES'
+  reserved_true: 'true'
+  reserved_null: 'null'
+  reserved_tilde: '~'
+  reserved_inf: '.inf'
+  num_int: '1982'
+  num_float: '3.14'
+  num_hex: '0x2A'
+  plain_word: 'hello'
+  plain_id: 'server_01'

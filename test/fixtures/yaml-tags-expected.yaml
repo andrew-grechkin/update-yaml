@@ -1,0 +1,12 @@
+---
+# standard tags
+event_time: !!timestamp "2026-07-17T12:00:00Z"
+image_blob: !!binary "R0lG"
+# integer as a string
+port_str: !!str 9090
+# custom local tag
+user: !MyType
+  name: alice
+  role: admin
+# untouched key with tag
+untouched: !!str kept

@@ -1,8 +1,8 @@
 service:
   metrics:
-    interval: 60
     port: 9090
     path: /metrics
+    interval: 60
   name: api
   config:
     cache:

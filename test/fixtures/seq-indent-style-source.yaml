@@ -1,0 +1,15 @@
+---
+# source uses INDENTED style throughout
+service:
+  # existing indented seq, data will send flush -> flush wins
+  hosts:
+    - old-a
+    - old-b
+  # existing indented seq, data will send indented -> indented stays
+  ports:
+    - 80
+    - 443
+  # scalar to be replaced by a flush-style seq -> flush
+  regions: unset
+  # scalar to be replaced by an indented-style seq -> indented
+  tags: unset

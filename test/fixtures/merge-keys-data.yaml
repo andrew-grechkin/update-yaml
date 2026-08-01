@@ -1,0 +1,4 @@
+---
+prod:
+  host: prod-v2.example.com
+  extra: added

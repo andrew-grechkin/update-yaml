@@ -108,72 +108,133 @@ func TestRunNoArgsIsPassthrough(t *testing.T) {
 	assertContains(t, got, "host: localhost")
 }
 
-// New keys go in alphabetically by default; UPDATE_YAML_PREFER_ORDER_PRESERVED
-// reverts to data-order append.
-func TestRunPreferOrderPreserved(t *testing.T) {
-	source := []byte("existing: value\n")
+// When source siblings are NOT already sorted the tool preserves the data
+// author's order for appended keys. Sorted-insertion only kicks in when
+// existing keys are ordered; unsorted mappings keep data-tree order.
+func TestRunAppendsInDataOrder(t *testing.T) {
+	// Source has two keys in author order (m before a) so
+	// siblingsAreSorted returns false and new keys append at the end
+	// in data-tree order rather than getting sort-inserted.
+	source := []byte("m_seed: 1\na_seed: 2\n")
 	data := []byte("zeta: 1\nbeta: 2\nalpha: 3\n")
 	dataPath := filepath.Join(t.TempDir(), "data.yaml")
 	if err := os.WriteFile(dataPath, data, 0o644); err != nil {
 		t.Fatalf("write data: %v", err)
 	}
 
-	t.Run("default sorted", func(t *testing.T) {
-		t.Setenv("UPDATE_YAML_PREFER_ORDER_PRESERVED", "")
-		var stdout bytes.Buffer
-		if err := run([]string{"update-yaml", dataPath}, bytes.NewReader(source), &stdout); err != nil {
-			t.Fatalf("run: %v", err)
-		}
-		want := "alpha: 3\nbeta: 2\nexisting: value\nzeta: 1\n"
-		if got := stdout.String(); got != want {
-			t.Errorf("default sorted insertion: want %q, got %q", want, got)
-		}
-	})
-
-	t.Run("env var preserves data order", func(t *testing.T) {
-		t.Setenv("UPDATE_YAML_PREFER_ORDER_PRESERVED", "1")
-		var stdout bytes.Buffer
-		if err := run([]string{"update-yaml", dataPath}, bytes.NewReader(source), &stdout); err != nil {
-			t.Fatalf("run: %v", err)
-		}
-		want := "existing: value\nzeta: 1\nbeta: 2\nalpha: 3\n"
-		if got := stdout.String(); got != want {
-			t.Errorf("env-var data-order: want %q, got %q", want, got)
-		}
-	})
+	var stdout bytes.Buffer
+	if err := run([]string{"update-yaml", dataPath}, bytes.NewReader(source), &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	want := "m_seed: 1\na_seed: 2\nzeta: 1\nbeta: 2\nalpha: 3\n"
+	if got := stdout.String(); got != want {
+		t.Errorf("want %q, got %q", want, got)
+	}
 }
 
-// UPDATE_YAML_PREFER_SINGLE_QUOTE prefers single quotes for values that need
-// quoting, regardless of what the source file uses.
-func TestRunPreferSingleQuote(t *testing.T) {
+// When source siblings are already sorted, appended keys land at their
+// alphabetical position instead of the end - preserving the author's
+// ordering convention.
+func TestRunSortsAppendedKeysWhenSourceIsSorted(t *testing.T) {
+	source := []byte("alpha: 1\ncharlie: 3\n")
+	data := []byte("delta: 4\nbravo: 2\n")
+	dataPath := filepath.Join(t.TempDir(), "data.yaml")
+	if err := os.WriteFile(dataPath, data, 0o644); err != nil {
+		t.Fatalf("write data: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	if err := run([]string{"update-yaml", dataPath}, bytes.NewReader(source), &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	want := "alpha: 1\nbravo: 2\ncharlie: 3\ndelta: 4\n"
+	if got := stdout.String(); got != want {
+		t.Errorf("want %q, got %q", want, got)
+	}
+}
+
+// Updated values keep the quote style the data file used - the tool honors
+// data's style verbatim. Appended keys likewise take their style from data.
+// Source's own quote style is preserved on untouched values.
+func TestRunAppendedKeysHonorDataStyle(t *testing.T) {
 	source := []byte(`host: "old"` + "\n")
 	dataPath := filepath.Join(t.TempDir(), "data.yaml")
 	if err := os.WriteFile(dataPath, []byte("version: '42'\n"), 0o644); err != nil {
 		t.Fatalf("write data: %v", err)
 	}
 
-	t.Run("default follows source", func(t *testing.T) {
-		t.Setenv("UPDATE_YAML_PREFER_SINGLE_QUOTE", "")
+	var stdout bytes.Buffer
+	if err := run([]string{"update-yaml", dataPath}, bytes.NewReader(source), &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	want := "host: \"old\"\nversion: '42'\n"
+	if got := stdout.String(); got != want {
+		t.Errorf("want %q, got %q", want, got)
+	}
+}
+
+// Folding of long plain scalars is opt-in via UPDATE_YAML_MAX_LINE_WIDTH.
+// Unset or non-positive values leave the tool in "data verbatim" mode
+// (no fold, no matter how long the record); a positive value sets the
+// column budget above which `>` folding kicks in.
+func TestRunMaxLineWidthEnvOptsIntoFolding(t *testing.T) {
+	// Value with spaces, ~150 chars: folds when budget is 120, stays
+	// plain when budget is 500 or when the env is unset.
+	longVal := strings.Repeat("word ", 30)
+	plainVal := strings.TrimRight(longVal, " ")
+	source := []byte("existing: keep\n")
+	data := []byte("description: " + longVal + "\n")
+	dataPath := filepath.Join(t.TempDir(), "data.yaml")
+	if err := os.WriteFile(dataPath, data, 0o644); err != nil {
+		t.Fatalf("write data: %v", err)
+	}
+
+	runOnce := func(t *testing.T) string {
+		t.Helper()
 		var stdout bytes.Buffer
 		if err := run([]string{"update-yaml", dataPath}, bytes.NewReader(source), &stdout); err != nil {
 			t.Fatalf("run: %v", err)
 		}
-		want := "host: \"old\"\nversion: \"42\"\n"
-		if got := stdout.String(); got != want {
-			t.Errorf("default: want %q, got %q", want, got)
-		}
+		return stdout.String()
+	}
+
+	t.Run("unset env leaves folding disabled", func(t *testing.T) {
+		// Explicit unset so the process env doesn't leak in from a
+		// caller that had it set.
+		t.Setenv("UPDATE_YAML_MAX_LINE_WIDTH", "")
+		out := runOnce(t)
+		assertNotContains(t, out, "description: >")
+		assertContains(t, out, "description: "+plainVal)
 	})
 
-	t.Run("env var prefers single", func(t *testing.T) {
-		t.Setenv("UPDATE_YAML_PREFER_SINGLE_QUOTE", "1")
-		var stdout bytes.Buffer
-		if err := run([]string{"update-yaml", dataPath}, bytes.NewReader(source), &stdout); err != nil {
-			t.Fatalf("run: %v", err)
-		}
-		want := "host: \"old\"\nversion: '42'\n"
-		if got := stdout.String(); got != want {
-			t.Errorf("env var: want %q, got %q", want, got)
-		}
+	t.Run("positive value below record length folds", func(t *testing.T) {
+		t.Setenv("UPDATE_YAML_MAX_LINE_WIDTH", "120")
+		assertContains(t, runOnce(t), "description: >")
+	})
+
+	t.Run("positive value above record length keeps plain", func(t *testing.T) {
+		t.Setenv("UPDATE_YAML_MAX_LINE_WIDTH", "500")
+		out := runOnce(t)
+		assertNotContains(t, out, "description: >")
+		assertContains(t, out, "description: "+plainVal)
+	})
+
+	t.Run("zero is ignored (folding stays off)", func(t *testing.T) {
+		t.Setenv("UPDATE_YAML_MAX_LINE_WIDTH", "0")
+		out := runOnce(t)
+		assertNotContains(t, out, "description: >")
+	})
+
+	t.Run("negative is ignored (folding stays off)", func(t *testing.T) {
+		t.Setenv("UPDATE_YAML_MAX_LINE_WIDTH", "-1")
+		out := runOnce(t)
+		assertNotContains(t, out, "description: >")
+	})
+
+	t.Run("non-numeric is ignored (folding stays off)", func(t *testing.T) {
+		t.Setenv("UPDATE_YAML_MAX_LINE_WIDTH", "not-a-number")
+		out := runOnce(t)
+		assertNotContains(t, out, "description: >")
 	})
 }
 

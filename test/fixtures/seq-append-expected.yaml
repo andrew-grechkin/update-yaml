@@ -1,4 +1,2 @@
-items:
-  - a
-  - b
+items: [a, b]
 keep: this

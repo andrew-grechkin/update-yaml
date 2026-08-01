@@ -1,0 +1,12 @@
+---
+short: 世界
+at120: 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世
+over120: >-
+  世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 x
+long: >-
+  世 hello 世 hello 世 hello 世 hello 世 hello 世 hello 世 hello 世 hello 世 hello 世 hello 世 hello 世 hello 世 hello
+  世 hello 世 hello 世 hello 世 hello 世 hello 世 hello 世 hello 世 hello
+nospaces: 世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世
+kept_folded: >-
+  original data-provided fold that must survive verbatim
+  because update-yaml never reformats source content

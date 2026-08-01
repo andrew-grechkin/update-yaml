@@ -1,16 +1,19 @@
 Usage: update-yaml [OPTIONS] [FILE...]
 
 A CLI filter for updating YAML documents from one or more YAML/JSON data
-files while preserving comments, key order, and formatting of the original.
+files while preserving comments, key order and formatting of the original.
 
 Reads source YAML from STDIN, outputs updated result to STDOUT.
 
 Data files are merged in order (later files override earlier ones).
 
-Comments and key order from STDIN are preserved.
 Keys that exist in the STDIN document are updated in place.
-Keys present only in the data files are injected into output.
-Setting a key to an explicit null in the merged data removes it from the output.
+Keys present only in the data files are inserted at their alphabetical
+position when the surrounding siblings are already sorted, otherwise
+appended at the end in data provided order.
+Comments and key order from STDIN are preserved.
+Data-provided inline comments override existing comments in output.
+Setting a key to an explicit null in the data removes it from the output.
 
 Options:
   -h, --help        Display help message
@@ -18,9 +21,8 @@ Options:
   -v, --version     Display version information (tip: update-yaml --version | jq -r .Version)
 
 Environment:
-  UPDATE_YAML_PREFER_ORDER_PRESERVED  new keys are appended in the order data declares them
-  UPDATE_YAML_PREFER_SINGLE_QUOTE     values that need quoting are emitted with single quotes
+  UPDATE_YAML_MAX_LINE_WIDTH   Opt-in fold budget for `>` block form; set to a positive integer to enable
 
 Examples:
   update-yaml < source.yaml base.yaml override.yaml
-  update-yaml <<< 'name: old # name of the item' <(echo 'name: new')
+  update-yaml <<< 'name: old # some comment' <(echo 'name: new # new comment')

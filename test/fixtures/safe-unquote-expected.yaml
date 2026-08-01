@@ -1,0 +1,23 @@
+---
+compose:
+  # docker-compose style port mappings - YAML 1.1 sexagesimal territory
+  port_short: 80:80
+  port_long: 80:8080
+  duration: '1:30:00'
+  # YAML 1.1 boolean spellings that older parsers resolve as bool
+  bool_yes: 'yes'
+  bool_On: 'On'
+  bool_off: 'off'
+  bool_YES: 'YES'
+  # YAML 1.2 reserved values
+  reserved_true: 'true'
+  reserved_null: 'null'
+  reserved_tilde: '~'
+  reserved_inf: '.inf'
+  # numeric-looking strings the author wants as strings
+  num_int: '1982'
+  num_float: '3.14'
+  num_hex: '0x2A'
+  # plain-safe values that SHOULD unquote
+  plain_word: hello
+  plain_id: server_01

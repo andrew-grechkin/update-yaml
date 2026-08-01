@@ -1,5 +1,2 @@
 parent:
-  new_items:
-    - aa
-    - bb
-    - cc
+  new_items: [aa, bb, cc]

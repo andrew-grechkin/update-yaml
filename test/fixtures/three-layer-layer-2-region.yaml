@@ -1,0 +1,9 @@
+---
+# region-specific tuning
+app:
+  logging:
+    format: json
+  features:
+    beta: true
+  timeouts:
+    connect: 10

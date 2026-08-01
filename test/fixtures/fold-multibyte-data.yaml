@@ -1,0 +1,15 @@
+---
+# short mixed-script value, well under 120 cols - stays plain
+short: 世界
+# key "at120" (5 chars) + ": " = 7 cols prefix. Value display width 113
+# (38 "世"s with 37 single-space breaks). Record total = 120 cols, at
+# the threshold, must NOT fold.
+at120: 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世
+# key "over120" (7 chars) + ": " = 9 cols prefix. Value display width
+# 112 (37 "世"s + 36 spaces + " x"). Record total = 121, MUST fold.
+over120: 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 世 x
+# long value in mixed script, forced to wrap onto multiple lines.
+long: 世 hello 世 hello 世 hello 世 hello 世 hello 世 hello 世 hello 世 hello 世 hello 世 hello 世 hello 世 hello 世 hello 世 hello 世 hello 世 hello 世 hello 世 hello 世 hello 世 hello 世 hello
+# no single-space break points - can't fold. Should stay plain even
+# though display width is well over 120.
+nospaces: 世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世世

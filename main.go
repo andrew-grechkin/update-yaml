@@ -14,6 +14,7 @@ import (
 
 	"github.com/andrew-grechkin/update-yaml/internal/ingest"
 	"github.com/andrew-grechkin/update-yaml/internal/transform"
+	pkgast "github.com/andrew-grechkin/update-yaml/pkg/ast"
 	"github.com/andrew-grechkin/update-yaml/pkg/output"
 	"github.com/andrew-grechkin/update-yaml/pkg/style"
 )
@@ -80,18 +81,45 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	style.Active = detectStyle(file)
 
-	// If data files were provided, they must cover every STDIN doc. Extra
-	// data docs are ignored (a separate concern), but a shortfall is fatal:
-	// silently leaving later stdin docs unupdated tends to hide config bugs.
-	if len(args) > 1 && len(mergedDocs) < len(file.Docs) {
-		return fmt.Errorf("stdin has %d documents but data covers only %d", len(file.Docs), len(mergedDocs))
+	// goccy peels `# hdr\n---` header comments into their own phantom
+	// doc; the count check and merge alignment must key off real docs
+	// only. Splice.Write still preserves the header via raw source bytes.
+	realDocs := realDocIndices(file.Docs)
+
+	// If data files were provided, they must cover every stdin doc.
+	// Extra data docs are ignored (a separate concern), but a shortfall
+	// is fatal: silently leaving later stdin docs unupdated tends to
+	// hide config bugs.
+	if len(args) > 1 && len(mergedDocs) < len(realDocs) {
+		return fmt.Errorf("stdin has %d documents but data covers only %d", len(realDocs), len(mergedDocs))
 	}
 
-	if err := transform.ApplyMergedDocs(file, mergedDocs); err != nil {
+	aligned := make([]*ast.DocumentNode, len(file.Docs))
+	for k, i := range realDocs {
+		if k >= len(mergedDocs) {
+			break
+		}
+		aligned[i] = mergedDocs[k]
+	}
+
+	if err := transform.ApplyMergedDocs(file, aligned); err != nil {
 		return err
 	}
 
-	return output.Write(stdout, file, stdinBytes, modifiedDocs(file, mergedDocs))
+	return output.Write(stdout, file, stdinBytes, modifiedDocs(file, aligned))
+}
+
+// Returns the file.Docs indices of real (non-phantom) documents, in
+// order. Used to align stdin doc slots with data doc slots when header
+// comments have created phantom source docs.
+func realDocIndices(docs []*ast.DocumentNode) []int {
+	out := make([]int, 0, len(docs))
+	for i, d := range docs {
+		if !pkgast.IsPhantomCommentDoc(d) {
+			out = append(out, i)
+		}
+	}
+	return out
 }
 
 // Reports per-doc whether updates were applied. Untouched docs are

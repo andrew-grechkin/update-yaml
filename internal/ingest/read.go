@@ -60,7 +60,15 @@ func readMultiDoc(path string) ([]*yamlast.DocumentNode, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error parsing %s: %w", path, err)
 	}
-	return file.Docs, nil
+	// Drop phantom `# hdr\n---` header docs; data comments carry no
+	// update payload and their presence would shift real docs off-slot.
+	out := file.Docs[:0]
+	for _, d := range file.Docs {
+		if !ast.IsPhantomCommentDoc(d) {
+			out = append(out, d)
+		}
+	}
+	return out, nil
 }
 
 // Combines two DocumentNodes into one at the doc level. When both have

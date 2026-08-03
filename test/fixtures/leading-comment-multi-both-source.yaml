@@ -1,0 +1,7 @@
+# leading source header
+---
+app:
+  port: 8080
+---
+worker:
+  queue: low

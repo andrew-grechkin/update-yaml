@@ -1,0 +1,7 @@
+# leading data header
+---
+app:
+  port: 9090
+---
+worker:
+  queue: high

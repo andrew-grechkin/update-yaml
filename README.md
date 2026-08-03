@@ -308,6 +308,23 @@ When data is provided for an index which is an explicit `null` or implicit-null 
 mapping so the data can land in it. Slots with no data leave the `null` body intact, so unmodified placeholder docs
 survive.
 
+### Header comments before `---` are parsed as a phantom document
+
+`libyaml` (and any other YAML 1.2 parser i know) folds a leading `# comment` on the first line into the following
+document. `github.com/goccy/go-yaml` instead peels it off into a synthetic comment-only `DocumentNode` (which is a bug)
+and bumps the real content down by one slot:
+
+```yaml
+# a stream header
+---
+foo: 1
+```
+
+libyaml sees one document `{foo: 1}` with a header comment; goccy reports two documents (the phantom comment plus the
+real mapping). Left alone, this would break the stdin-vs-data doc-count check and shift data into the wrong slot when
+the header sits on the data file. `update-yaml` filters these phantom docs out of the count/merge alignment and
+preserves the header via the raw source-byte splice on the output side.
+
 ## AUTHOR
 
 - Andrew Grechkin

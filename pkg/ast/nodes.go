@@ -19,6 +19,17 @@ func IsNullNode(n yamlast.Node) bool {
 	return ok
 }
 
+// Reports whether d is a comment-only phantom doc that goccy emits for
+// header comments preceding `---`. libyaml folds these into the following
+// doc; callers filter them to keep source/data slot alignment intact.
+func IsPhantomCommentDoc(d *yamlast.DocumentNode) bool {
+	if d == nil || d.Body == nil {
+		return false
+	}
+	_, ok := d.Body.(*yamlast.CommentGroupNode)
+	return ok
+}
+
 // Extracts the string form of a mapping key. StringNode is the common
 // case; anything else falls back to the node's .String() form.
 func KeyString(node yamlast.Node) string {

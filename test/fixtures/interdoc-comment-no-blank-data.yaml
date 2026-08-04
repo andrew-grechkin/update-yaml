@@ -1,0 +1,4 @@
+a: 11
+# stray data-side comment
+---
+b: 22

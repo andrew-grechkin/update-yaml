@@ -1,11 +1,13 @@
-//go:build debug
+// Reflect-based helpers that turn arbitrary Go values - including the
+// polymorphic goccy AST - into a JSON/YAML-serializable representation.
+// Kept in its own package (rather than co-located with pkg/inspect's
+// Trace* helpers) so consumers can pull in Inspect/DumpJson/DumpYaml
+// without also pulling in the debug-tagged trace path. Release builds
+// of the main tool link only pkg/inspect and see the trace stubs, so
+// this package stays out of their link set; the cmd/probe-yaml binary
+// depends on it directly and is compiled unconditionally.
 
-// Debug-only AST/token inspection helpers. Not compiled unless the binary is
-// built with `-tags debug`; call sites that reference these functions must
-// be gated the same way (or left commented out for ad-hoc enabling during
-// a debug session).
-
-package inspect
+package dump
 
 import (
 	"encoding/json"
@@ -51,11 +53,17 @@ func Inspect(data any) any {
 	return inspectValue(v)
 }
 
-// Returns the value pointed to by v, dereferencing chained pointers.
+// Returns the concrete value inside v, dereferencing chained pointers
+// and unwrapping interface wrappers. Interface unwrapping is what lets
+// Inspect walk an AST tree whose child fields are typed as ast.Node
+// (an interface) - without it, the reflection walk stops at every
+// polymorphic boundary and the stringify-fallback in inspectValue
+// swallows the subtree.
 //
-// If v is or resolves to a nil pointer, returns the zero reflect.Value.
+// If v is or resolves to a nil pointer/interface, returns the zero
+// reflect.Value.
 func unwrap(v reflect.Value) reflect.Value {
-	for v.Kind() == reflect.Pointer {
+	for v.IsValid() && (v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface) {
 		if v.IsNil() {
 			return reflect.Value{}
 		}

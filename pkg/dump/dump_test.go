@@ -1,6 +1,4 @@
-//go:build debug
-
-package inspect
+package dump
 
 import (
 	"encoding/json"

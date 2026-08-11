@@ -4,7 +4,11 @@ export tool := 'update-yaml'
 
 # Build the binary to cache directory
 @build: fix
-    go build -o "$XDG_CACHE_HOME/go/bin/"
+    go build -o "$XDG_CACHE_HOME/go/bin"
+
+# Build cmd/probe-yaml
+@build-probe: fix
+    go build -o "$XDG_CACHE_HOME/go/bin" ./cmd/probe-yaml
 
 # Show godoc for the package including debug-tagged symbols
 doc:

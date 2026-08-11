@@ -21,3 +21,6 @@ compose:
   # plain-safe values that SHOULD unquote
   plain_word: 'PLACEHOLDER'
   plain_id: 'PLACEHOLDER'
+
+  success: null
+  failure: null

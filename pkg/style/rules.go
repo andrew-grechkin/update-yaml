@@ -184,30 +184,55 @@ func plainRecordLen(val, key string, keyCol int) int {
 // survive. Visits both keys and values so JSON-style double-quoted keys
 // ("port": 9090) end up as plain YAML keys.
 //
+// Tracks flow context during descent: once the walker enters a
+// flow-style mapping or sequence, every nested string is checked with
+// SafeToUnquoteInFlow instead of SafeToUnquote so a value like
+// `^[234][0-9]{2}$` (safe in block, would swallow the closing bracket
+// in flow) stays quoted.
+//
 // Rewrites Token.Type, Token.Value, and Token.Origin so goccy re-emits
 // the value plain instead of reusing the original "..."-wrapped source
 // text. Rewriting all three is required for idempotence: a re-parse of
 // the output must produce a StringNode that no longer needs unquoting.
 func UnquoteSafeStrings(n ast.Node) {
-	astutil.Walk(n, func(node ast.Node) bool {
-		s, ok := node.(*ast.StringNode)
-		if !ok {
-			return true
+	unquoteSafeStrings(n, false)
+}
+
+func unquoteSafeStrings(n ast.Node, inFlow bool) {
+	if n == nil {
+		return
+	}
+	switch v := n.(type) {
+	case *ast.MappingNode:
+		childFlow := inFlow || v.IsFlowStyle
+		for _, mv := range v.Values {
+			unquoteSafeStrings(mv, childFlow)
 		}
-		if s.Token == nil {
-			return true
+	case *ast.MappingValueNode:
+		unquoteSafeStrings(v.Key, inFlow)
+		unquoteSafeStrings(v.Value, inFlow)
+	case *ast.SequenceNode:
+		childFlow := inFlow || v.IsFlowStyle
+		for _, c := range v.Values {
+			unquoteSafeStrings(c, childFlow)
 		}
-		if !astutil.IsExplicitQuote(s.Token.Type) {
-			return true
+	case *ast.AnchorNode:
+		unquoteSafeStrings(v.Value, inFlow)
+	case *ast.StringNode:
+		if v.Token == nil || !astutil.IsExplicitQuote(v.Token.Type) {
+			return
 		}
-		if !SafeToUnquote(s.Value) {
-			return true
+		safe := SafeToUnquote(v.Value)
+		if inFlow {
+			safe = SafeToUnquoteInFlow(v.Value)
 		}
-		s.Token.Type = token.StringType
-		s.Token.Value = s.Value
-		s.Token.Origin = s.Value
-		return true
-	})
+		if !safe {
+			return
+		}
+		v.Token.Type = token.StringType
+		v.Token.Value = v.Value
+		v.Token.Origin = v.Value
+	}
 }
 
 // Scalar forms that YAML 1.1 (still widely used by Ansible, older Puppet,
@@ -256,10 +281,11 @@ func DisplayWidth(s string) int { return runewidth.StringWidth(s) }
 // (`80:80`, `1:30:00`). Real-world files - docker-compose port mappings,
 // Ansible playbooks - lean on the 1.1 conventions.
 //
-// The check runs in block context (top-level parse). A quoted scalar
-// inside a flow-style mapping/sequence has stricter plain-scalar rules
-// (no bare commas, brackets, or braces); if that comes up, this function
-// will need flow-context awareness.
+// The check runs in block context (top-level parse). Callers emitting
+// scalars inside a flow-style mapping/sequence should use
+// SafeToUnquoteInFlow instead - flow context has stricter plain-scalar
+// rules (no bare commas, brackets, or braces) that this function does
+// not enforce on its own.
 func SafeToUnquote(v string) bool {
 	if v == "" {
 		return false
@@ -275,6 +301,38 @@ func SafeToUnquote(v string) bool {
 		return false
 	}
 	sn, ok := file.Docs[0].Body.(*ast.StringNode)
+	if !ok {
+		return false
+	}
+	return sn.Value == v
+}
+
+// Decides whether v is safe to write as a plain scalar inside a
+// flow-style mapping or sequence. Layered check: first the block-context
+// oracle, then a fast reject on any of the five flow indicators
+// (`,`, `[`, `]`, `{`, `}`) that would terminate the scalar early, then
+// a flow-context oracle that parses `[v]` and confirms it round-trips
+// as a single-element flow sequence carrying v verbatim. The fast
+// reject covers the common case cheaply; the oracle catches edge cases
+// the character check would miss (whitespace-only strings that flow
+// resolves to null, adjacent-indicator patterns that don't survive
+// scalar-boundary parsing).
+func SafeToUnquoteInFlow(v string) bool {
+	if !SafeToUnquote(v) {
+		return false
+	}
+	if strings.ContainsAny(v, "[]{},") {
+		return false
+	}
+	file, err := parser.ParseBytes([]byte("["+v+"]"), 0)
+	if err != nil || len(file.Docs) != 1 {
+		return false
+	}
+	seq, ok := file.Docs[0].Body.(*ast.SequenceNode)
+	if !ok || !seq.IsFlowStyle || len(seq.Values) != 1 {
+		return false
+	}
+	sn, ok := seq.Values[0].(*ast.StringNode)
 	if !ok {
 		return false
 	}

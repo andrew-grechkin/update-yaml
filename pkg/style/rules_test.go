@@ -136,6 +136,43 @@ func TestSafeToUnquote(t *testing.T) {
 	}
 }
 
+func TestSafeToUnquoteInFlow(t *testing.T) {
+	// Values that round-trip cleanly whether emitted in block or flow.
+	safe := []string{
+		"hello", "server_01", "path-name", "eu-west-1",
+		"https://example.com/path",
+	}
+	// Values safe in block but unsafe in flow: they contain one of the
+	// five flow indicators (`,`, `[`, `]`, `{`, `}`), so a bare emission
+	// like `[^[234][0-9]{2}$]` would fail to reparse.
+	unsafeInFlow := []string{
+		"^[234][0-9]{2}$",
+		"foo,bar",
+		"a[b", "a]b", "a{b", "a}b",
+	}
+	// Values already unsafe in block (empty, YAML 1.1 spellings, etc.)
+	// are also unsafe in flow.
+	unsafeAnywhere := []string{"", "yes", "1:30:00", "true", "42"}
+	for _, v := range safe {
+		if !SafeToUnquoteInFlow(v) {
+			t.Errorf("SafeToUnquoteInFlow(%q) = false, want true", v)
+		}
+	}
+	for _, v := range unsafeInFlow {
+		if !SafeToUnquote(v) {
+			t.Errorf("precondition: SafeToUnquote(%q) = false, expected true (block-safe)", v)
+		}
+		if SafeToUnquoteInFlow(v) {
+			t.Errorf("SafeToUnquoteInFlow(%q) = true, want false", v)
+		}
+	}
+	for _, v := range unsafeAnywhere {
+		if SafeToUnquoteInFlow(v) {
+			t.Errorf("SafeToUnquoteInFlow(%q) = true, want false", v)
+		}
+	}
+}
+
 func TestNeedsQuoting(t *testing.T) {
 	quoted := []string{"", " leading-space", "\tleading-tab", "-dash", "?q", ":colon", "#hash",
 		"trailing ", "trailing:", "a: b", "a #b", "true", "False", "yes"}

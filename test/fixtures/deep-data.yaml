@@ -1,0 +1,24 @@
+--- {}
+---
+nodeAffinity: # top-level rule set
+  requiredDuringSchedulingIgnoredDuringExecution:
+    nodeSelectorTerms:
+    - matchExpressions:
+      - key: reservation # tenant reservation
+        operator: In
+        values: [map, table] # allowed backends
+        further:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - {key: region, operator: In, values: [us-east, us-west]} # geo pinning
+                further:
+                  requiredDuringSchedulingIgnoredDuringExecution:
+                    nodeSelectorTerms:
+                    - matchExpressions:
+                      - key: zone # AZ-level pinning
+                        operator: NotIn
+                        values:
+                        - us-east-1a
+                        - us-east-1b # avoid degraded AZ
+                        - us-east-1c

@@ -1,0 +1,8 @@
+name: example
+---
+kind: RuntimeConfig
+metadata:
+  version: 3.0.0
+nodeAffinity:
+  requiredDuringSchedulingIgnoredDuringExecution:
+    nodeSelectorTerms: null

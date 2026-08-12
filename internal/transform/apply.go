@@ -473,6 +473,10 @@ func targetKeyColumn(mn *yamlast.MappingNode) int {
 // their Prev chains because gaps within data's subtree are legitimate
 // formatting the author chose.
 func realignAppended(mv *yamlast.MappingValueNode, keyCol int) {
+	// Snapshot data's parent-vs-dash offset BEFORE clobbering the key
+	// column, so a block-sequence value keeps the author's compact
+	// (`- x` under parent) or indented (`  - x`) style.
+	seqAddIndent := dataSequenceAddIndent(mv)
 	ast.SetPositionColumn(mv.Key, keyCol)
 	// NOTE: monkey-patch for goccy render bugs. See the removal checklist
 	// in pkg/patch/goccy.go.
@@ -480,26 +484,22 @@ func realignAppended(mv *yamlast.MappingValueNode, keyCol int) {
 		kt.Prev = nil
 	}
 	childCol := keyCol + style.Active.Indent
-	realignValueAt(mv.Value, keyCol, childCol)
+	realignValueAt(mv.Value, keyCol, childCol, seqAddIndent)
 }
 
 // Rewrites positions for a value node given (a) the parent key's column
-// (used for block-scalar content that indents relative to key) and (b)
-// the child column (used for nested mapping/sequence keys).
-func realignValueAt(n yamlast.Node, keyCol, childCol int) {
+// (used for block-scalar content that indents relative to key), (b) the
+// child column (used for nested mapping keys), and (c) seqAddIndent: the
+// parent-vs-dash offset for a block-sequence value, or -1 for "not a
+// block sequence, fall back to style.Active.Indent".
+func realignValueAt(n yamlast.Node, keyCol, childCol, seqAddIndent int) {
 	switch v := n.(type) {
 	case *yamlast.MappingNode:
 		for _, child := range v.Values {
 			realignAppended(child, childCol)
 		}
 	case *yamlast.SequenceNode:
-		// Block-style sequence with IndentSequence=true renders entries at
-		// keyCol + indent (deeper than key); flow-style renders inline and
-		// column doesn't matter. Either way, recurse into entries with
-		// childCol as the anchor.
-		for _, entry := range v.Values {
-			realignValueAt(entry, childCol, childCol+style.Active.Indent)
-		}
+		realignSequence(v, keyCol, childCol, seqAddIndent)
 	case *yamlast.LiteralNode:
 		if v.Value != nil {
 			ast.SetPositionColumn(v.Value, childCol)
@@ -509,7 +509,38 @@ func realignValueAt(n yamlast.Node, keyCol, childCol int) {
 			ast.SetPositionColumn(v, childCol)
 		}
 	case *yamlast.AnchorNode:
-		realignValueAt(v.Value, keyCol, childCol)
+		realignValueAt(v.Value, keyCol, childCol, seqAddIndent)
+	}
+}
+
+// Rewrites a block or flow sequence and its entries. Block sequences
+// honor data's parent-vs-dash offset (seqAddIndent) so compact `- x`
+// under a key and indented `  - x` both survive; entries sit two cols
+// after the dash (`- ` prefix), independent of style.Active.Indent.
+func realignSequence(v *yamlast.SequenceNode, keyCol, childCol, seqAddIndent int) {
+	if v.IsFlowStyle {
+		for _, entry := range v.Values {
+			realignValueAt(entry, childCol, childCol+style.Active.Indent, -1)
+		}
+		return
+	}
+	addIndent := seqAddIndent
+	if addIndent < 0 {
+		addIndent = style.Active.Indent
+	}
+	dashCol := keyCol + addIndent
+	if v.Start != nil && v.Start.Position != nil {
+		v.Start.Position.Column = dashCol
+	}
+	entryKeyCol := dashCol + 2
+	for _, entry := range v.Values {
+		if e, ok := entry.(*yamlast.MappingNode); ok {
+			for _, child := range e.Values {
+				realignAppended(child, entryKeyCol)
+			}
+			continue
+		}
+		realignValueAt(entry, entryKeyCol, entryKeyCol+style.Active.Indent, -1)
 	}
 }
 
@@ -572,17 +603,9 @@ func realignToKey(n yamlast.Node, keyCol, keyIndent, seqAddIndent int) {
 			realignAppended(child, childCol)
 		}
 	case *yamlast.SequenceNode:
-		addIndent := seqAddIndent
-		if addIndent < 0 {
-			addIndent = style.Active.Indent
-		}
-		entryCol := keyCol + addIndent
-		if v.Start != nil && v.Start.Position != nil {
-			v.Start.Position.Column = entryCol
-		}
-		for _, entry := range v.Values {
-			realignValueAt(entry, entryCol, entryCol+style.Active.Indent)
-		}
+		// Delegate to realignValueAt so seq-entry column math stays in
+		// one place; seqAddIndent carries the -1 fallback semantics.
+		realignValueAt(v, keyCol, keyCol+style.Active.Indent, seqAddIndent)
 	}
 }
 

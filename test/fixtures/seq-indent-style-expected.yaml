@@ -3,8 +3,8 @@
 service:
   # existing indented seq, data will send flush -> flush wins
   hosts:
-  - new-a
-  - new-b
+    - new-a
+    - new-b
   # existing indented seq, data will send indented -> indented stays
   ports:
     - 8080

@@ -1,3 +1,31 @@
-items:
+items_equal:
 - a
 - b
+items_less:
+- a
+items_more:
+- a
+- b
+- c
+items_delete:
+- a
+- b
+items_flush_empty:
+- a
+- b
+- c
+deep_items_equal:
+  - key11: value11
+    key12: value12
+  - key21: value21
+    key22: value22
+deep_items_less:
+  - key11: value11
+    key12: value12
+deep_items_more:
+  - key11: value11
+    key12: value12
+  - key21: value21
+    key22: value22
+  - key31: value31
+    key32: value32

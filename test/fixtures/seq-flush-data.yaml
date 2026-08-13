@@ -1,1 +1,33 @@
-items: [aa, bb, cc]
+---
+items_equal: [aa, bb]
+items_less: [aa, bb, cc]
+items_more: [aa]
+items_delete: null
+items_flush_empty: []
+deep_items_equal:
+- key11: value11 !
+  key12: value12 !
+  key13: value13 +
+- key21: value21 !
+  key22: null
+deep_items_less:
+- key11: value11 !
+  key: value
+  key12: value12 !
+- key: value
+  key21: value21 !
+  key23: value22 +
+- - key31: value31 !
+    key32: value32 !
+    key33: value32 +
+  - key: value
+    null_key: null  # this should not be in result
+    nested_array:
+    - null  # this should be in result, it's in array, elements in array deleted by providing reduced array
+    - hash:
+        null_key: null  # this should lead to empty hash
+    - []
+deep_items_more:
+- key: value
+  key11: null
+  key12: null

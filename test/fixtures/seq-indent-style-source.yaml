@@ -5,6 +5,7 @@ service:
   hosts:
     - old-a
     - old-b
+    - old-c
   # existing indented seq, data will send indented -> indented stays
   ports:
     - 80

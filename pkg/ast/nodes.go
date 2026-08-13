@@ -4,6 +4,7 @@
 package ast
 
 import (
+	"reflect"
 	"strings"
 
 	yaml "github.com/goccy/go-yaml"
@@ -28,6 +29,25 @@ func IsPhantomCommentDoc(d *yamlast.DocumentNode) bool {
 	}
 	_, ok := d.Body.(*yamlast.CommentGroupNode)
 	return ok
+}
+
+// Reports whether two AST nodes decode to the same Go value, ignoring
+// formatting (columns, comments, block-vs-flow, quote style). Callers
+// use this to short-circuit no-op updates: if data's subtree is
+// semantically equal to source's, there is nothing to apply and source's
+// exact bytes should pass through untouched.
+func EqualIgnoringStyle(a, b yamlast.Node) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	var av, bv any
+	if err := yaml.NodeToValue(a, &av); err != nil {
+		return false
+	}
+	if err := yaml.NodeToValue(b, &bv); err != nil {
+		return false
+	}
+	return reflect.DeepEqual(av, bv)
 }
 
 // Extracts the string form of a mapping key. StringNode is the common

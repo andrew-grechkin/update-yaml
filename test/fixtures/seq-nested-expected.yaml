@@ -1,2 +1,5 @@
 parent:
-  items: [aa, bb, cc]
+  items:
+  - aa
+  - bb
+  - cc

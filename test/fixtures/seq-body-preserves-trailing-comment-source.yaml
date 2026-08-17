@@ -1,0 +1,5 @@
+- name: first
+  role: admin
+- name: second
+  role: user
+# trailing on sequence body

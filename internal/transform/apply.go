@@ -382,6 +382,10 @@ func removeMarkedEntries(mn *yamlast.MappingNode, toRemove map[*yamlast.MappingV
 	if len(toRemove) == 0 {
 		return
 	}
+	// Doc-level head/foot comments live on the first/last mapping entry (goccy has no separate DocumentNode slot for
+	// them). If that entry is being removed, its doc-level portion would go with it. Snapshot before the loop so we
+	// can re-attach onto whichever entry becomes the new first/last survivor.
+	head, foot := extractDocLevelForRemoval(mn.Values, toRemove)
 	filtered := mn.Values[:0]
 	for i, mv := range mn.Values {
 		if toRemove[mv] {
@@ -401,6 +405,81 @@ func removeMarkedEntries(mn *yamlast.MappingNode, toRemove map[*yamlast.MappingV
 		filtered = append(filtered, mv)
 	}
 	mn.Values = filtered
+	reattachDocLevelAfterRemoval(mn.Values, head, foot)
+}
+
+// extractDocLevelForRemoval snapshots the doc-level head/foot comment groups that would be lost if the current first/
+// last entry is among the removed. Returns them detached from the source slots so the removal loop doesn't re-add
+// them via `filtered = append`. Head extraction splits the first entry's Comment by blank-line gap: the portion
+// separated from the key by at least one blank line is doc-level (returned); the entry-adjacent portion stays and
+// goes with the removed entry. Foot extraction is simpler: any FootComment on the last entry IS doc-level (mapping
+// bodies don't otherwise use FootComment on the last position).
+func extractDocLevelForRemoval(values []*yamlast.MappingValueNode, toRemove map[*yamlast.MappingValueNode]bool) (head []*yamlast.CommentNode, foot *yamlast.CommentGroupNode) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	if first := values[0]; toRemove[first] && first.Comment != nil {
+		head = takeDocLevelHead(first)
+	}
+	if last := values[len(values)-1]; toRemove[last] && last.FootComment != nil {
+		foot = last.FootComment
+		last.FootComment = nil
+	}
+	return head, foot
+}
+
+// takeDocLevelHead splits mv.Comment.Comments by source-line gap: everything before the first blank-line break is
+// doc-level and returned (detached from mv), the rest stays on mv.Comment as its key-adjacent head. Mirrors the
+// same rule format-yaml's render.ExtractDocLevelHead uses; kept here inline instead of in a shared package because
+// the returned slice type (`[]*ast.CommentNode`) differs from the render side's `[]string` for re-attachment.
+func takeDocLevelHead(mv *yamlast.MappingValueNode) []*yamlast.CommentNode {
+	comments := mv.Comment.Comments
+	if len(comments) == 0 {
+		return nil
+	}
+	keyLine := mv.Key.GetToken().Position.Line
+	splitAt := 0
+	for i := len(comments) - 1; i >= 0; i-- {
+		nextLine := keyLine
+		if i < len(comments)-1 {
+			nextLine = comments[i+1].Token.Position.Line
+		}
+		if nextLine-comments[i].Token.Position.Line != 1 {
+			splitAt = i + 1
+			break
+		}
+	}
+	if splitAt == 0 {
+		return nil
+	}
+	docLevel := comments[:splitAt]
+	mv.Comment.Comments = comments[splitAt:]
+	return docLevel
+}
+
+// reattachDocLevelAfterRemoval places the saved doc-level head/foot comment groups back onto the new first/last
+// surviving entries. When the mapping ends up empty the comments have nowhere to go and are dropped (no surviving
+// entry means goccy would emit an empty body anyway; keeping the comment orphans it).
+func reattachDocLevelAfterRemoval(values []*yamlast.MappingValueNode, head []*yamlast.CommentNode, foot *yamlast.CommentGroupNode) {
+	if len(values) == 0 {
+		return
+	}
+	if len(head) > 0 {
+		first := values[0]
+		if first.Comment == nil {
+			first.Comment = &yamlast.CommentGroupNode{Comments: head}
+		} else {
+			first.Comment.Comments = append(head, first.Comment.Comments...)
+		}
+	}
+	if foot != nil {
+		last := values[len(values)-1]
+		if last.FootComment == nil {
+			last.FootComment = foot
+		} else {
+			last.FootComment.Comments = append(last.FootComment.Comments, foot.Comments...)
+		}
+	}
 }
 
 // Finds the next entry that will survive the removal pass and reports

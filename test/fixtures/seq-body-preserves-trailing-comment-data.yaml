@@ -1,0 +1,2 @@
+- name: only
+  role: guest

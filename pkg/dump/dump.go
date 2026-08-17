@@ -41,16 +41,14 @@ func DumpYaml(data any) string {
 
 // Returns a JSON/YAML-serializable representation of data.
 //
-// A top-level struct is labeled as {TypeName: fields}; nested structs
-// contribute their fields inline.
+// Every struct is labeled as {TypeName: fields} EXCEPT when it sits inside a field whose name already matches the
+// struct's type - that would produce redundant `Token: {Token: {...}}` shapes. The rule surfaces polymorphic slots
+// (an interface-typed field's concrete type shows up in the output) without cluttering concrete typed fields where
+// the type is already obvious from the field name.
 //
 // Unsupported kinds (channel, func, ...) are stringified as a fallback.
 func Inspect(data any) any {
-	v := unwrap(reflect.ValueOf(data))
-	if v.IsValid() && v.Kind() == reflect.Struct {
-		return map[string]any{v.Type().Name(): inspectFields(v)}
-	}
-	return inspectValue(v)
+	return inspectValue(reflect.ValueOf(data), "")
 }
 
 // Returns the concrete value inside v, dereferencing chained pointers
@@ -72,22 +70,27 @@ func unwrap(v reflect.Value) reflect.Value {
 	return v
 }
 
-// Returns a JSON/YAML-serializable representation of v.
-//
-// Structs contribute their fields inline without a type-name wrapper.
-func inspectValue(v reflect.Value) any {
+// Returns a JSON/YAML-serializable representation of v. fieldName is the name of the field that holds this value in
+// its parent struct (empty for top-level and for slice elements). When a struct's type name equals fieldName, the
+// {TypeName: ...} wrap is omitted - the label would be redundant with the field key that already reads the same.
+func inspectValue(v reflect.Value, fieldName string) any {
 	v = unwrap(v)
 	if !v.IsValid() {
 		return nil
 	}
 	switch v.Kind() {
 	case reflect.Struct:
-		return inspectFields(v)
+		typeName := v.Type().Name()
+		fields := inspectFields(v)
+		if typeName == fieldName {
+			return fields
+		}
+		return map[string]any{typeName: fields}
 
 	case reflect.Slice, reflect.Array:
 		ret := make([]any, v.Len())
 		for i := 0; i < v.Len(); i++ {
-			ret[i] = inspectValue(v.Index(i))
+			ret[i] = inspectValue(v.Index(i), "")
 		}
 		return ret
 
@@ -107,11 +110,10 @@ func inspectValue(v reflect.Value) any {
 	}
 }
 
-// Returns a map of the exported fields of the struct v, keyed by field
-// name.
+// Returns a map of the exported fields of the struct v, keyed by field name. Passes each field's name down to
+// inspectValue so nested structs can decide whether to elide their own type-name wrapper.
 //
-// The tokenizer's Next and Prev linked-list pointers are excluded to keep
-// dumps scoped to the target node.
+// The tokenizer's Next and Prev linked-list pointers are excluded to keep dumps scoped to the target node.
 func inspectFields(v reflect.Value) map[string]any {
 	fields := make(map[string]any)
 	for i := 0; i < v.NumField(); i++ {
@@ -123,7 +125,7 @@ func inspectFields(v reflect.Value) map[string]any {
 		if !field.CanInterface() {
 			continue
 		}
-		fields[f.Name] = inspectValue(field)
+		fields[f.Name] = inspectValue(field, f.Name)
 	}
 	return fields
 }

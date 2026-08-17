@@ -1,0 +1,3 @@
+- name: only
+  role: guest
+# trailing on sequence body
